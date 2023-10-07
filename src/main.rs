@@ -9,6 +9,7 @@ use nvml_wrapper::structs::device::UtilizationInfo;
 use nvml_wrapper::Device;
 use nvml_wrapper::Nvml;
 use std::time;
+use std::time::Duration;
 
 use gpu::GpuInfo;
 
@@ -24,9 +25,12 @@ fn main() -> Result<()> {
     let gpu: GpuInfo = GpuInfo { inner: &device };
 
     let t1 = std::time::Instant::now();
+
+    let delay = args.delay;
+
     loop {
-        // println!("{:#?}", gpu.device.utilization_rates().unwrap());
         println!("GpuInfo:\n{}", gpu);
+        std::thread::sleep(Duration::from_millis(delay));
 
         if t1.elapsed().as_secs() > 10 {
             break;
@@ -40,12 +44,11 @@ pub mod nvtop_args {
 
     use clap::Parser;
 
-    /// Struct representing CLI arguments.
     #[derive(Parser)]
     pub(crate) struct Cli {
-        /// Number of times to wait in milliseconds.
+        /// Number of time to wait in millis.
         #[clap(short, long, value_name = "MILLISECONDS")]
-        delay: u32,
+        pub(crate) delay: u64,
     }
 }
 
