@@ -19,15 +19,6 @@ fn main() -> Result<()> {
 
     let delay = Duration::from_millis(args.delay);
 
-    // loop {
-    //     println!("GpuInfo:\n{}", gpu);
-    //     std::thread::sleep(Duration::from_millis(delay));
-
-    //     if t1.elapsed().as_secs() > 10 {
-    //         break;
-    //     }
-    // }
-
     if let Err(e) = run(gpu, delay) {
         error!("{e}");
     }
