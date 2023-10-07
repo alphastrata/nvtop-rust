@@ -1,20 +1,21 @@
 #![allow(unused_imports, unused_variables, dead_code)]
-use std::time;
-
 use anyhow::Result;
+use clap::Parser;
 use log::{error, info, trace};
-
-use gpu::GpuInfo;
 use nvml_wrapper::enum_wrappers::device::Brand;
 use nvml_wrapper::enum_wrappers::device::Clock;
 use nvml_wrapper::enum_wrappers::device::ClockId;
 use nvml_wrapper::structs::device::UtilizationInfo;
 use nvml_wrapper::Device;
-
 use nvml_wrapper::Nvml;
+use std::time;
+
+use gpu::GpuInfo;
 
 fn main() -> Result<()> {
     pretty_env_logger::init();
+
+    let args = nvtop_args::Cli::parse();
 
     let nvml = Nvml::init()?;
     // Get the first `Device` (GPU) in the system
@@ -33,6 +34,19 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+pub mod nvtop_args {
+
+    use clap::Parser;
+
+    /// Struct representing CLI arguments.
+    #[derive(Parser)]
+    pub(crate) struct Cli {
+        /// Number of times to wait in milliseconds.
+        #[clap(short, long, value_name = "MILLISECONDS")]
+        delay: u32,
+    }
 }
 
 pub mod gpu {
@@ -56,7 +70,17 @@ pub mod gpu {
 
     impl<'d> fmt::Display for GpuInfo<'d> {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            let meminfo = self.inner.memory_info().unwrap();
+            let utilisation = self.inner.utilization_rates().unwrap();
             write!(f, "Brand: {:?}\n", self.inner.brand())?;
+            write!(f, "core: {:?}%\n", utilisation.gpu)?;
+            write!(f, "mem_used: {:?}\n", meminfo.used as f64 / 1_073_741_824.0)?;
+            write!(f, "mem {:?}%\n", (meminfo.total / meminfo.used))?;
+            write!(
+                f,
+                "mem_total: {:?}\n",
+                meminfo.total as f64 / 1_073_741_824.0
+            )?;
 
             // TODO: the other stuff we may want to print...
 
