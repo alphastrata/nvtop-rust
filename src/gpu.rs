@@ -52,7 +52,7 @@ impl<'d> fmt::Display for GpuInfo<'d> {
                 .for_each(|clock_type| {
                     match self.inner.clock(clock_type.clone(), clock_id.clone()) {
                         Ok(value) => {
-                            write!(f, "Clock {:?} for {:?}: {}\n", clock_type, clock_id, value)
+                            writeln!(f, "Clock {:?} for {:?}: {}", clock_type, clock_id, value)
                                 .unwrap_or_default()
                         }
                         Err(_err) => {
@@ -79,7 +79,7 @@ mod tests {
         // Get the first `Device` (GPU) in the system
         let device = nvml.device_by_index(0).unwrap();
 
-        (0..10).into_iter().for_each(|_| {
+        (0..10).for_each(|_| {
             [
                 ClockId::Current,
                 ClockId::TargetAppClock,
