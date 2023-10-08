@@ -111,7 +111,7 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
 
                 match key.code {
                     KeyCode::Char('q') => break,
-                    KeyCode::F(n) if gpu_list.len() > n.into() => selected_gpu = n.into(),
+                    KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => selected_gpu = usize::from(n - 1),
                     KeyCode::Char('p') => {
                         // re-scan pci tree to let driver discover new devices (only works as sudo)
                         match nvml.discover_gpus(PciInfo {
