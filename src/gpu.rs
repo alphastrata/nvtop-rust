@@ -1,6 +1,9 @@
 use std::{fmt, ops::Deref};
 
-use nvml_wrapper::{enum_wrappers::device::TemperatureSensor, Device};
+use nvml_wrapper::{
+    enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
+    Device,
+};
 
 #[derive(Debug)]
 pub struct GpuInfo<'d> {
@@ -30,30 +33,28 @@ impl<'d> fmt::Display for GpuInfo<'d> {
             self.inner.temperature(TemperatureSensor::Gpu)
         )?;
 
-        // TODO: the other stuff we may want to print...
-
-        // for clock_id in [
-        //     ClockId::Current,
-        //     ClockId::TargetAppClock,
-        //     ClockId::DefaultAppClock,
-        //     ClockId::CustomerMaxBoost,
-        // ]
-        // .into_iter()
-        // {
-        //     [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
-        //         .into_iter()
-        //         .for_each(|clock_type| {
-        //             match self.device.clock(clock_type.clone(), clock_id.clone()) {
-        //                 Ok(value) => {
-        //                     write!(f, "Clock {:?} for {:?}: {}\n", clock_type, clock_id, value)
-        //                         .unwrap_or_default()
-        //                 }
-        //                 Err(_err) => {
-        //                     log::error!("{_err}")
-        //                 }
-        //             }
-        //         });
-        // }
+        [
+            ClockId::Current,
+            ClockId::TargetAppClock,
+            ClockId::DefaultAppClock,
+            ClockId::CustomerMaxBoost,
+        ]
+        .into_iter()
+        .for_each(|clock_id| {
+            [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
+                .into_iter()
+                .for_each(|clock_type| {
+                    match self.inner.clock(clock_type.clone(), clock_id.clone()) {
+                        Ok(value) => {
+                            write!(f, "Clock {:?} for {:?}: {}\n", clock_type, clock_id, value)
+                                .unwrap_or_default()
+                        }
+                        Err(_err) => {
+                            log::error!("{_err}")
+                        }
+                    }
+                });
+        });
         Ok(())
     }
 }
@@ -65,6 +66,7 @@ mod tests {
         Nvml,
     };
 
+    #[ignore = ""]
     #[test]
     fn clock_memory() {
         let nvml = Nvml::init().unwrap();
