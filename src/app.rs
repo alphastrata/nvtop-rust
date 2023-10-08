@@ -33,22 +33,26 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
         _ = terminal.draw(|f| {
             let gpu = &gpu_list[selected_gpu];
 
-            let top_bar = Some(Constraint::Length(1)).filter(|_| gpu_list.len() > 1);
-            let [top_bar @ .., mid_area, btm_bar] = &Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(
-                    [Constraint::Length(1), Constraint::Min(0)]
-                        .into_iter()
-                        .chain(top_bar)
-                        .rev()
-                        .collect::<Vec<_>>(),
-                )
-                .split(f.size())[..]
-            else {
-                unreachable!()
-            };
+            // draw tab bar if more than one device is connected
+            let mid_area = if gpu_list.len() == 1 {
+                let layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Min(0), Constraint::Length(1)])
+                    .split(f.size());
 
-            if let [top_bar] = top_bar {
+                f.render_widget(Paragraph::new("q to quit, p to rescan devices"), layout[1]);
+
+                layout[0]
+            } else {
+                let layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(1),
+                        Constraint::Min(0),
+                        Constraint::Length(1),
+                    ])
+                    .split(f.size());
+
                 f.render_widget(
                     Tabs::new(
                         gpu_list
@@ -60,14 +64,16 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                     .style(Style::default().fg(Color::Green))
                     .highlight_style(Style::default().fg(Color::Green).bold())
                     .divider(DOT),
-                    *top_bar,
+                    layout[0],
                 );
-            }
 
-            f.render_widget(
-                Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices"),
-                *btm_bar,
-            );
+                f.render_widget(
+                    Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices"),
+                    layout[2],
+                );
+
+                layout[1]
+            };
 
             // Outermost Block, which draws the green border aound the whole UI.
             let block = Block::default()
@@ -78,7 +84,7 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                 .border_style(Style::default().fg(Color::Green))
                 .border_type(BorderType::Rounded)
                 .style(Style::default());
-            f.render_widget(block, *mid_area);
+            f.render_widget(block, mid_area);
 
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
