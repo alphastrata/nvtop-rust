@@ -2,8 +2,32 @@
 name = "nvtop"
 version = "0.1.0"
 edition = "2021"
+description = """
+`nvtop`: An NVIDIA SMI'esk GPU Monitoring tool for your terminal.
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+`nvtop` is a command-line utility that provides a replacement for some of the output from `nvidia-smi` (System Management Interface).
+It offers real-time monitoring and visualization of GPU information: Core Clock, Temps, Fanspeed and Memory Usage.
+
+# Usage:
+```
+# Monitor the GPU and system with a 1-second update interval
+nvtop --delay 1000
+```
+
+"""
+Keywords = [
+  "Real-time monitoring",
+  "GPU",
+  "NVIDIA",
+  "nvml",
+  "nvidia-smi",
+  "Command-line tool",
+]
+authors = ["jer, alphastrata@gmail.com"]
+documentation = "github.com/alphastrata/nvtop"
+license = "MIT"
+homepage = "www.jeremyfwebb.ninja"
+publish = false
 
 [dependencies]
 anyhow = "1.0.75"
