@@ -3,7 +3,7 @@ use std::{fmt, ops::Deref, io::{self, ErrorKind}};
 use log::{trace, error, debug};
 use nvml_wrapper::{
     enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
-    Device, Nvml, error::NvmlError, struct_wrappers::device::PciInfo,
+    Device, Nvml, error::NvmlError,
 };
 
 use crate::errors::NvTopError;
@@ -111,23 +111,6 @@ impl fmt::Display for GpuInfo<'_> {
 }
 
 pub fn list_available_gpus(nvml: &Nvml) -> Result<Vec<GpuInfo<'_>>, NvTopError> {
-    // re-scan pci tree to discover new devices (only works as sudo)
-    match nvml.discover_gpus(PciInfo {
-        bus: 0,
-        bus_id: "".into(),
-        device: 0,
-        domain: 0,
-        pci_device_id: 0,
-        pci_sub_system_id: Some(0),
-    }) {
-        Ok(()) => debug!("Re-scanned PCI tree"),
-        Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
-            debug!("Failed to re-scan PCI tree: {e}");
-        }
-        Err(e) => return Err(e.into()),
-    }
-
-    // enumerate all the devices
     let count = nvml.device_count()?;
     let mut gpu_list = Vec::with_capacity(count as usize);
 

@@ -24,14 +24,7 @@ fn main() -> Result<(), NvTopError> {
     let nvml = Nvml::init()?;
     trace!("Nvml init success");
 
-    // Get the available devices
-    let devices = nvtop::gpu::list_available_gpus(&nvml)?;
-
-    // Get the first `Device` (GPU) in the system
-    let gpu = &devices[0];
-    // panic!("Starting TUI with GPU = {gpu}\n");
-
-    if let Err(e) = run(&gpu, Duration::from_millis(args.delay)) {
+    if let Err(e) = run(nvml, Duration::from_millis(args.delay)) {
         error!("app::run() -> {e}");
     }
 

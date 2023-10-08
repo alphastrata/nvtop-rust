@@ -1,5 +1,7 @@
-use log::trace;
+use log::{trace, debug};
 use nvml_wrapper::enum_wrappers::device::{Clock, ClockId};
+use nvml_wrapper::error::NvmlError;
+use nvml_wrapper::struct_wrappers::device::PciInfo;
 use nvml_wrapper::{enum_wrappers::device::TemperatureSensor, struct_wrappers::device::MemoryInfo};
 
 use ratatui::{prelude::*, widgets::*};
@@ -15,12 +17,15 @@ use crate::stylers::calculate_severity;
 use crate::{errors, gpu::GpuInfo};
 pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 
-pub fn run(gpu: &GpuInfo<'_>, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
+pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stderr()))?;
     trace!("crossterm initialisation successful");
+
+    let mut gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+    let mut selected_gpu: usize = 0;
 
     loop {
         _ = terminal.draw(|f| {
@@ -47,6 +52,8 @@ pub fn run(gpu: &GpuInfo<'_>, delay: Duration) -> anyhow::Result<(), errors::NvT
                 .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
                 .margin(1)
                 .split(f.size());
+
+            let gpu = &gpu_list[selected_gpu];
 
             {
                 let chunks = Layout::default()
@@ -100,8 +107,35 @@ pub fn run(gpu: &GpuInfo<'_>, delay: Duration) -> anyhow::Result<(), errors::NvT
 
         if crossterm::event::poll(std::time::Duration::from_millis(250))? {
             if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                if key.code == crossterm::event::KeyCode::Char('q') {
-                    break;
+                use crossterm::event::KeyCode;
+
+                match key.code {
+                    KeyCode::Char('q') => break,
+                    KeyCode::F(n) if gpu_list.len() > n.into() => selected_gpu = n.into(),
+                    KeyCode::Char('p') => {
+                        // re-scan pci tree to let driver discover new devices (only works as sudo)
+                        match nvml.discover_gpus(PciInfo {
+                            bus: 0,
+                            bus_id: "".into(),
+                            device: 0,
+                            domain: 0,
+                            pci_device_id: 0,
+                            pci_sub_system_id: Some(0),
+                        }) {
+                            Ok(()) => debug!("Re-scanned PCI tree"),
+                            Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
+                                debug!("Failed to re-scan PCI tree: {e}");
+                            }
+                            Err(e) => return Err(e.into()),
+                        }
+                    
+                        // re-scan for devices
+                        gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+                        if selected_gpu >= gpu_list.len() {
+                            selected_gpu = 0;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
