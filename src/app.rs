@@ -10,6 +10,7 @@ use ratatui::{
 
 use std::time::Duration;
 
+use crate::errors::NvTopError;
 use crate::stylers::calculate_severity;
 use crate::{errors, gpu::GpuInfo};
 pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
@@ -22,7 +23,7 @@ pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::
     trace!("crossterm initialisation successful");
 
     loop {
-        terminal.draw(|f| {
+        _ = terminal.draw(|f| {
             f.render_widget(Paragraph::new("q to quit"), f.size());
 
             let top_chunk = Layout::default()
@@ -41,7 +42,6 @@ pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::
                 .style(Style::default());
             f.render_widget(block, top_chunk[0]);
 
-            // Chunking into |A  |B|:
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
@@ -63,7 +63,7 @@ pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::
                 f.render_widget(core_guage, chunks[0]);
 
                 // Core Clock:
-                let core_guage = draw_core_clock(&gpu);
+                let core_guage = draw_core_clock(&gpu).unwrap();
                 f.render_widget(core_guage, chunks[1]);
 
                 // Misc:
@@ -94,6 +94,8 @@ pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::
                 let fan_guage = draw_fan_speed(&gpu);
                 f.render_widget(fan_guage, chunks[2]);
             }
+
+            ()
         })?;
 
         if crossterm::event::poll(std::time::Duration::from_millis(250))? {
@@ -106,6 +108,7 @@ pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::
 
         // primitive rate limiting.
         std::thread::sleep(delay);
+        ()
     }
 
     crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)?;
@@ -165,7 +168,7 @@ fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
     let mem_total = mem_info.total as f64 / 1_073_741_824.0;
     let mem_percentage = mem_used / mem_total; // Normalize to a value between 0 and 1
 
-    let label = format!("{:.2}/{:.2}GB", mem_percentage, mem_total);
+    let label = format!("{:.2}/{:.2}GB", mem_used, mem_total);
     let spanned_label = Span::styled(label, Style::new().white().bold());
 
     Gauge::default()
@@ -216,15 +219,14 @@ fn draw_core_utilisation<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         .percent(percent)
 }
 
-fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
-    let core_clock = gpu.inner.clock(Clock::Graphics, ClockId::Current);
-    let percent = core_clock.map_or(0, |ur| (ur / gpu.max_core_clock) as u16);
-    trace!("core_clock {}", percent);
+fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, NvTopError> {
+    let current_clock = gpu.inner.clock(Clock::Graphics, ClockId::Current)?;
+    let percentage = (current_clock / gpu.max_memory_clock) as f64;
 
-    let label = format!("{}/{}MHz", percent, gpu.max_core_clock);
+    let label = format!("{}/{}MHz", current_clock, gpu.max_core_clock);
     let spanned_label = Span::styled(label, Style::new().white().bold());
 
-    Gauge::default()
+    Ok(Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Core Clock"))
         .gauge_style(Style {
             fg: Some(Color::Green),
@@ -234,5 +236,5 @@ fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
             sub_modifier: Modifier::UNDERLINED,
         })
         .label(spanned_label)
-        .percent(percent.clamp(0, 1))
+        .ratio(percentage.clamp(0.0, 1.0)))
 }

@@ -14,6 +14,7 @@ pub struct GpuInfo<'d> {
     pub driver_version: String,
     pub cuda_version: f32,
     pub misc: String,
+    pub num_cores: u32,
 }
 
 impl<'d> Deref for GpuInfo<'d> {
@@ -55,8 +56,12 @@ impl<'d> fmt::Display for GpuInfo<'d> {
                             writeln!(f, "Clock {:?} for {:?}: {}", clock_type, clock_id, value)
                                 .unwrap_or_default()
                         }
-                        Err(_err) => {
-                            log::error!("{_err}")
+                        Err(err) => {
+                            let formatted = format!(
+                                "clock_type={:?}\t\tclock_id={:?} {}",
+                                clock_type, clock_id, err,
+                            );
+                            log::error!("{formatted}")
                         }
                     }
                 });
@@ -93,7 +98,7 @@ mod tests {
                     .for_each(|clock_type| {
                         match device.clock(clock_type.clone(), clock_id.clone()) {
                             Ok(value) => {
-                                println!("Clock {:?} for {:?}: {}\n", clock_type, clock_id, value);
+                                println!("Clock: {:?} for {:?}: {}\n", clock_type, clock_id, value);
                             }
                             Err(_err) => {}
                         }

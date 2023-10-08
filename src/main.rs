@@ -41,31 +41,27 @@ fn main() -> Result<(), NvTopError> {
     );
     trace!("Setting misc = {misc}");
 
-    let max_memory_clock: Vec<u32> = device.supported_memory_clocks()?;
-    let max_clock = match device.clock(Clock::Graphics, ClockId::CustomerMaxBoost) {
-        Ok(max_clock) => {
-            trace!("CustomerMaxBoost is available!");
-            max_clock
-        }
-        Err(e) => {
-            error!("{e} CustomerMaxBoost is UNAVAILABLE");
-            1
-        }
-    };
+    dbg!(
+        device.max_clock_info(Clock::Graphics)?,
+        device.max_clock_info(Clock::Video)?,
+        device.max_clock_info(Clock::SM)?,
+        device.max_clock_info(Clock::Memory)?,
+    );
 
     let gpu = GpuInfo {
         inner: &device,
-        max_memory_clock: max_memory_clock.into_iter().max().unwrap_or_default(), // FIXME:
-        max_core_clock: max_clock,
+        max_memory_clock: device.max_clock_info(Clock::Memory)?,
+        max_core_clock: device.max_clock_info(Clock::Graphics)?,
         card_type,
         driver_version,
         cuda_version,
         misc,
+        num_cores: device.num_cores()?,
     };
+    // panic!("Starting TUI with GPU = {gpu}\n");
 
-    trace!("Starting TUI with GPU = {gpu}\n");
     if let Err(e) = run(&gpu, Duration::from_millis(args.delay)) {
-        error!("{e}");
+        error!("app::run() -> {e}");
     }
 
     Ok(())
