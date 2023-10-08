@@ -3,12 +3,9 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Parser;
 use log::{error, trace};
-use nvml_wrapper::{
-    enum_wrappers::device::{Clock, ClockId},
-    Nvml, error::NvmlError,
-};
+use nvml_wrapper::Nvml;
 
-use nvtop::{app::run, errors::NvTopError, gpu::GpuInfo, nvtop_args, termite::setup_logger};
+use nvtop::{app::run, errors::NvTopError, nvtop_args, termite::setup_logger};
 
 fn main() -> Result<(), NvTopError> {
     let args = nvtop_args::Cli::parse();

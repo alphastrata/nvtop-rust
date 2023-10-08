@@ -1,6 +1,6 @@
 use std::{fmt, ops::Deref, io::{self, ErrorKind}};
 
-use log::{trace, error, debug};
+use log::{trace, error};
 use nvml_wrapper::{
     enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
     Device, Nvml, error::NvmlError,

@@ -66,15 +66,15 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                     .split(chunks[0]);
 
                 // Core:
-                let core_guage = draw_core_utilisation(&gpu);
-                f.render_widget(core_guage, chunks[0]);
+                let core_gauge = draw_core_utilisation(gpu);
+                f.render_widget(core_gauge, chunks[0]);
 
                 // Core Clock:
-                let core_guage = draw_core_clock(&gpu).unwrap();
-                f.render_widget(core_guage, chunks[1]);
+                let core_gauge = draw_core_clock(gpu).unwrap();
+                f.render_widget(core_gauge, chunks[1]);
 
                 // Misc:
-                let paragraph = draw_misc(&gpu);
+                let paragraph = draw_misc(gpu);
                 f.render_widget(paragraph, chunks[2]);
             }
 
@@ -90,19 +90,19 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                     .split(chunks[1]);
 
                 // Memory:
-                let mem_usage_guage = draw_memory_usage(&gpu);
-                f.render_widget(mem_usage_guage, chunks[0]);
+                let mem_usage_gauge = draw_memory_usage(gpu);
+                f.render_widget(mem_usage_gauge, chunks[0]);
 
                 // Temp:
-                let temp_guage = draw_gpu_die_temp(&gpu);
-                f.render_widget(temp_guage, chunks[1]);
+                let temp_gauge = draw_gpu_die_temp(gpu);
+                f.render_widget(temp_gauge, chunks[1]);
 
                 // Fanspeed:
-                let fan_guage = draw_fan_speed(&gpu);
-                f.render_widget(fan_guage, chunks[2]);
+                let fan_gauge = draw_fan_speed(gpu);
+                f.render_widget(fan_gauge, chunks[2]);
             }
 
-            ()
+            
         })?;
 
         if crossterm::event::poll(std::time::Duration::from_millis(250))? {
@@ -142,7 +142,7 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
 
         // primitive rate limiting.
         std::thread::sleep(delay);
-        ()
+        
     }
 
     crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)?;
