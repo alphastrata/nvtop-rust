@@ -75,14 +75,24 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopErr
 
                 //NVIDIA TITAN RTX  Driver Version: 535.113.01   CUDA Version: 12.2
                 let card = gpu.inner.brand().unwrap();
-                let driver = gpu.inner.nvml().sys_driver_version().unwrap();
-                let cuda_v = gpu.inner.nvml().sys_cuda_driver_version().unwrap();
+                let driver = gpu
+                    .inner
+                    .nvml()
+                    .sys_driver_version()
+                    .map_or("UNAVAILABLE".into(), |driver| driver);
+
+                let cuda_v = gpu
+                    .inner
+                    .nvml()
+                    .sys_cuda_driver_version()
+                    .map_or(0.0, |sdv| sdv as f32);
+
                 //TODO: self.brand self.sys_driver, sys_cuda // because these never change we may as well get them at init and use em everywhere...
                 let label = format!(
                     "Card: {:?}    Driver Version: {}    CUDA Version: {}",
                     card,
                     driver,
-                    cuda_v as f32 / 1000.0
+                    cuda_v / 1000.0
                 );
 
                 let block = Block::default().borders(Borders::ALL).title(Span::styled(
