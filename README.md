@@ -49,14 +49,14 @@ You can install `nvtop` directly from Cargo. Follow these steps:
    cargo install --git https://github.com/alphastrata/nvtop
    ```
 
-### Install from Source
+### Build manually
 
-To install `nvtop` from the source code, you can follow these steps:
+To build `nvtop` from the source code, you can follow these steps:
 
 1. Download the source code or clone the repository to your local machine:
 
    ```bash
-   git clone https://github.com/alphastrata/nvtop.git
+   git clone https://github.com/alphastrata/nvtop
    ```
 
 1. Change to the `nvtop` directory:
@@ -73,12 +73,12 @@ To install `nvtop` from the source code, you can follow these steps:
 
 1. After building, you can find the `nvtop` executable in the `target/release/` directory.
 
-### Install to Path
+#### Install build artifact
 
-To make `nvtop` easily accessible from the command line, you can copy the executable to a directory in your system's `PATH`. For example, you can copy it to `/usr/local/bin`:
+To make `nvtop` easily accessible from the command line, you can copy the executable to a directory in your system's `PATH`. For example, you can copy it to `/usr/local/bin/`:
 
 ```bash
-sudo cp target/release/nvtop /usr/local/bin/
+sudo install -Dm755 target/release/nvtop /usr/local/bin/nvtop
 ```
 
 Now, you can use `nvtop` from anywhere in your terminal.
