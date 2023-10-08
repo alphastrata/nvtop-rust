@@ -1,9 +1,14 @@
-use std::{fmt, ops::Deref, io::{self, ErrorKind}};
+use std::{
+    fmt,
+    io::{self, ErrorKind},
+    ops::Deref,
+};
 
-use log::{trace, error};
+use log::{error, trace};
 use nvml_wrapper::{
     enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
-    Device, Nvml, error::NvmlError,
+    error::NvmlError,
+    Device, Nvml,
 };
 
 use crate::errors::NvTopError;
@@ -27,7 +32,7 @@ impl<'d> GpuInfo<'d> {
         let card_type = format!("{:?}", device.brand()?);
         let driver_version = device.nvml().sys_driver_version()?;
         let cuda_version = device.nvml().sys_cuda_driver_version()? as f32;
-    
+
         let misc = format!(
             "Card: {:?}    Driver Version: {}    CUDA Version: {}",
             card_type,
@@ -35,7 +40,7 @@ impl<'d> GpuInfo<'d> {
             cuda_version / 1000.0
         );
         trace!("Setting misc = {misc}");
-    
+
         // dbg!(
         //     dev.max_clock_info(Clock::Graphics)?,
         //     dev.max_clock_info(Clock::Video)?,
@@ -120,8 +125,13 @@ pub fn list_available_gpus(nvml: &Nvml) -> Result<Vec<GpuInfo<'_>>, NvTopError> 
                 let gpu = GpuInfo::from_device(i, dev)?;
                 trace!("Compatible GPU found at [{i}]: {gpu}");
                 gpu_list.push(gpu);
-            },
-            Err(err @ (NvmlError::InsufficientPower | NvmlError::NoPermission | NvmlError::IrqIssue | NvmlError::GpuLost)) => {
+            }
+            Err(
+                err @ (NvmlError::InsufficientPower
+                | NvmlError::NoPermission
+                | NvmlError::IrqIssue
+                | NvmlError::GpuLost),
+            ) => {
                 error!("Failed to init device [{i}]: {err}");
                 continue; // carry on
             }

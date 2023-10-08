@@ -1,9 +1,10 @@
-use log::{trace, debug};
+use log::{debug, trace};
 use nvml_wrapper::enum_wrappers::device::{Clock, ClockId};
 use nvml_wrapper::error::NvmlError;
 use nvml_wrapper::struct_wrappers::device::PciInfo;
 use nvml_wrapper::{enum_wrappers::device::TemperatureSensor, struct_wrappers::device::MemoryInfo};
 
+use ratatui::symbols::DOT;
 use ratatui::{prelude::*, widgets::*};
 use ratatui::{
     prelude::{CrosstermBackend, Terminal},
@@ -25,16 +26,48 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
     trace!("crossterm initialisation successful");
 
     let mut gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+
     let mut selected_gpu: usize = 0;
 
     loop {
         _ = terminal.draw(|f| {
-            f.render_widget(Paragraph::new("q to quit"), f.size());
+            let gpu = &gpu_list[selected_gpu];
 
-            let top_chunk = Layout::default()
+            let top_bar = Some(Constraint::Length(1)).filter(|_| gpu_list.len() > 1);
+            let [top_bar @ .., mid_area, btm_bar] = &Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(100)])
-                .split(f.size());
+                .constraints(
+                    [Constraint::Length(1), Constraint::Min(0)]
+                        .into_iter()
+                        .chain(top_bar)
+                        .rev()
+                        .collect::<Vec<_>>(),
+                )
+                .split(f.size())[..]
+            else {
+                unreachable!()
+            };
+
+            if let [top_bar] = top_bar {
+                f.render_widget(
+                    Tabs::new(
+                        gpu_list
+                            .iter()
+                            .map(|gpu| format!("[{}] {}", gpu.index, gpu.card_type))
+                            .collect(),
+                    )
+                    .select(selected_gpu)
+                    .style(Style::default().fg(Color::Green))
+                    .highlight_style(Style::default().fg(Color::Green).bold())
+                    .divider(DOT),
+                    *top_bar,
+                );
+            }
+
+            f.render_widget(
+                Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices"),
+                *btm_bar,
+            );
 
             // Outermost Block, which draws the green border aound the whole UI.
             let block = Block::default()
@@ -45,15 +78,13 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                 .border_style(Style::default().fg(Color::Green))
                 .border_type(BorderType::Rounded)
                 .style(Style::default());
-            f.render_widget(block, top_chunk[0]);
+            f.render_widget(block, *mid_area);
 
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
                 .margin(1)
                 .split(f.size());
-
-            let gpu = &gpu_list[selected_gpu];
 
             {
                 let chunks = Layout::default()
@@ -101,8 +132,6 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                 let fan_gauge = draw_fan_speed(gpu);
                 f.render_widget(fan_gauge, chunks[2]);
             }
-
-            
         })?;
 
         if crossterm::event::poll(std::time::Duration::from_millis(250))? {
@@ -111,7 +140,9 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
 
                 match key.code {
                     KeyCode::Char('q') => break,
-                    KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => selected_gpu = usize::from(n - 1),
+                    KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => {
+                        selected_gpu = usize::from(n - 1)
+                    }
                     KeyCode::Char('p') => {
                         // re-scan pci tree to let driver discover new devices (only works as sudo)
                         match nvml.discover_gpus(PciInfo {
@@ -128,7 +159,7 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                             }
                             Err(e) => return Err(e.into()),
                         }
-                    
+
                         // re-scan for devices
                         gpu_list = crate::gpu::list_available_gpus(&nvml)?;
                         if selected_gpu >= gpu_list.len() {
@@ -142,7 +173,6 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
 
         // primitive rate limiting.
         std::thread::sleep(delay);
-        
     }
 
     crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)?;
