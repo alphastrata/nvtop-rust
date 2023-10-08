@@ -26,7 +26,7 @@ Keywords = [
 authors = ["jer, alphastrata@gmail.com"]
 documentation = "github.com/alphastrata/nvtop"
 license = "MIT"
-homepage = "www.jeremyfwebb.ninja"
+homepage = "https://www.jeremyfwebb.ninja"
 publish = true
 
 [dependencies]
