@@ -23,11 +23,7 @@ impl<'d> fmt::Display for GpuInfo<'d> {
         writeln!(f, "core: {:?}%", utilisation.gpu)?;
         writeln!(f, "mem_used: {:?}", meminfo.used as f64 / 1_073_741_824.0)?;
         writeln!(f, "mem {:?}%", (meminfo.total / meminfo.used))?;
-        writeln!(
-            f,
-            "mem_total: {:?}",
-            meminfo.total as f64 / 1_073_741_824.0
-        )?;
+        writeln!(f, "mem_total: {:?}", meminfo.total as f64 / 1_073_741_824.0)?;
         writeln!(
             f,
             "Temp: {:?}C",
@@ -59,5 +55,43 @@ impl<'d> fmt::Display for GpuInfo<'d> {
         //         });
         // }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nvml_wrapper::{
+        enum_wrappers::device::{Clock, ClockId},
+        Nvml,
+    };
+
+    #[test]
+    fn clock_memory() {
+        let nvml = Nvml::init().unwrap();
+        // Get the first `Device` (GPU) in the system
+        let device = nvml.device_by_index(0).unwrap();
+
+        (0..10).into_iter().for_each(|_| {
+            [
+                ClockId::Current,
+                ClockId::TargetAppClock,
+                ClockId::DefaultAppClock,
+                ClockId::CustomerMaxBoost,
+            ]
+            .into_iter()
+            .for_each(|clock_id| {
+                [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
+                    .into_iter()
+                    .for_each(|clock_type| {
+                        match device.clock(clock_type.clone(), clock_id.clone()) {
+                            Ok(value) => {
+                                println!("Clock {:?} for {:?}: {}\n", clock_type, clock_id, value);
+                            }
+                            Err(_err) => {}
+                        }
+                    });
+            });
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        });
     }
 }
