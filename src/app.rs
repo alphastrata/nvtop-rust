@@ -127,7 +127,7 @@ fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
 
     let percentage = (avg / 100.).clamp(0., 1.0);
     let label = format!("{:.1}%", avg);
-    let spanned_label = Span::styled(label, Style::new().white().bold());
+    let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
 
     Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Fan Speed"))
@@ -144,7 +144,7 @@ fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         .map_or(0, |temp| temp);
 
     let label = format!("{:.2}°C", gpu_die_temperature);
-    let spanned_label = Span::styled(label, Style::new().white().bold());
+    let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
     let temp_ratio = (gpu_die_temperature as f64 / 100.).clamp(0., 1.0);
 
     Gauge::default()
@@ -170,7 +170,7 @@ fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
     let mem_percentage = (mem_used / mem_total).clamp(0.0, 1.0);
 
     let label = format!("{:.2}/{:.2}GB", mem_used, mem_total);
-    let spanned_label = Span::styled(label, Style::new().white().bold());
+    let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
 
     Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Memory Usage"))
@@ -198,7 +198,10 @@ fn draw_core_utilisation<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
     let utilisation_rates = gpu.inner.utilization_rates();
     let percent = utilisation_rates.map_or(0, |ur| ur.gpu as u16);
 
-    let spanned_label = Span::styled(format!("{}%", percent), Style::new().white().bold());
+    let spanned_label = Span::styled(
+        format!("{}%", percent),
+        Style::new().white().bold().bg(Color::Black),
+    );
 
     Gauge::default()
         .block(
@@ -206,7 +209,13 @@ fn draw_core_utilisation<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
                 .borders(Borders::ALL)
                 .title("Core Utilisation"),
         )
-        .gauge_style(calculate_severity(percent).style_for())
+        .gauge_style(Style {
+            fg: Some(Color::Green),
+            bg: None,
+            underline_color: None,
+            add_modifier: Modifier::BOLD,
+            sub_modifier: Modifier::BOLD,
+        })
         .percent(percent)
         .label(spanned_label)
 }
@@ -216,7 +225,7 @@ fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, NvTopError> {
     let percentage = (current_clock as f64 / gpu.max_core_clock as f64).clamp(0.0, 1.0);
 
     let label = format!("{}/{}Mhz", current_clock, gpu.max_core_clock);
-    let spanned_label = Span::styled(label, Style::new().white().bold());
+    let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
 
     Ok(Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Core Clock"))
