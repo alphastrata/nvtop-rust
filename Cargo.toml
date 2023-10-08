@@ -27,7 +27,7 @@ authors = ["jer, alphastrata@gmail.com"]
 documentation = "github.com/alphastrata/nvtop"
 license = "MIT"
 homepage = "www.jeremyfwebb.ninja"
-publish = false
+publish = true
 
 [dependencies]
 anyhow = "1.0.75"
