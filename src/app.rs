@@ -221,9 +221,11 @@ fn draw_core_utilisation<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
 
 fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, NvTopError> {
     let current_clock = gpu.inner.clock(Clock::Graphics, ClockId::Current)?;
-    let percentage = (current_clock / gpu.max_memory_clock) as f64;
+    // let percentage = current_clock as f64 / gpu.max_memory_clock as f64;
+    // let percentage = ((gpu.max_memory_clock as f64 / current_clock as f64) / 10.0).clamp(0.0, 1.0);
+    let percentage = (current_clock as f64 / gpu.max_core_clock as f64).clamp(0.0, 1.0);
 
-    let label = format!("{}/{}MHz", current_clock, gpu.max_core_clock);
+    let label = format!("{}/{}Mhz", current_clock, gpu.max_core_clock);
     let spanned_label = Span::styled(label, Style::new().white().bold());
 
     Ok(Gauge::default()
@@ -236,5 +238,5 @@ fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, NvTopError> {
             sub_modifier: Modifier::UNDERLINED,
         })
         .label(spanned_label)
-        .ratio(percentage.clamp(0.0, 1.0)))
+        .ratio(percentage))
 }
