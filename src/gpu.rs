@@ -8,6 +8,12 @@ use nvml_wrapper::{
 #[derive(Debug)]
 pub struct GpuInfo<'d> {
     pub inner: &'d Device<'d>,
+    pub max_memory_clock: u32,
+    pub max_core_clock: u32,
+    pub card_type: String,
+    pub driver_version: String,
+    pub cuda_version: f32,
+    pub misc: String,
 }
 
 impl<'d> Deref for GpuInfo<'d> {

@@ -50,14 +50,13 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopErr
             {
                 let chunks = Layout::default()
                     .constraints(vec![
-                        Constraint::Percentage(44),
-                        Constraint::Percentage(44),
-                        Constraint::Percentage(12),
+                        Constraint::Percentage(60),
+                        Constraint::Percentage(20),
+                        Constraint::Percentage(20),
                     ])
                     .margin(1)
                     .split(chunks[0]);
 
-                // Chunk |A|
                 // Core:
                 let core_guage = draw_core_utilisation(&gpu);
                 f.render_widget(core_guage, chunks[0]);
@@ -66,15 +65,12 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopErr
                 let core_guage = draw_core_clock(&gpu);
                 f.render_widget(core_guage, chunks[1]);
 
-                //NVIDIA TITAN RTX  Driver Version: 535.113.01   CUDA Version: 12.2
+                // Misc:
                 let paragraph = draw_misc(&gpu);
                 f.render_widget(paragraph, chunks[2]);
             }
 
             {
-                //Chunking into|A  |B
-                //             |a2 |C
-                //             |   |D
                 let chunks = Layout::default()
                     .constraints([
                         Constraint::Percentage(33),
@@ -85,17 +81,14 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopErr
                     .margin(1)
                     .split(chunks[1]);
 
-                // Chunk B
                 // Memory:
                 let mem_usage_guage = draw_memory_usage(&gpu);
                 f.render_widget(mem_usage_guage, chunks[0]);
 
-                // Chunk C:
                 // Temp:
                 let temp_guage = draw_gpu_die_temp(&gpu);
                 f.render_widget(temp_guage, chunks[1]);
 
-                // Chunk D:
                 // Fanspeed:
                 let fan_guage = draw_fan_speed(&gpu);
                 f.render_widget(fan_guage, chunks[2]);
@@ -109,6 +102,8 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopErr
                 }
             }
         }
+
+        // primitive rate limiting.
         std::thread::sleep(delay);
     }
 
@@ -165,11 +160,9 @@ fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         |mem_info| mem_info,
     );
 
-    let mem_used = mem_info.used as f64 / 1_073_741_824.0;
-    // as GB
+    let mem_used = mem_info.used as f64 / 1_073_741_824.0; // as GB
     let mem_total = mem_info.total as f64 / 1_073_741_824.0;
-    let mem_percentage = mem_used / mem_total;
-    // Normalize to a value between 0 and 1
+    let mem_percentage = mem_used / mem_total; // Normalize to a value between 0 and 1
 
     let label = format!("{:.2}/{:.2}GB", mem_percentage, mem_total);
     let spanned_label = Span::styled(label, Style::new().white().bold());
@@ -187,28 +180,7 @@ fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
     mem_usage_guage
 }
 
-fn draw_misc<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
-    let card = gpu.inner.brand().unwrap();
-    let driver = gpu
-        .inner
-        .nvml()
-        .sys_driver_version()
-        .map_or("UNAVAILABLE".into(), |driver| driver);
-
-    let cuda_v = gpu
-        .inner
-        .nvml()
-        .sys_cuda_driver_version()
-        .map_or(0.0, |sdv| sdv as f32);
-
-    //TODO: self.brand self.sys_driver, sys_cuda // because these never change we may as well get them at init and use em everywhere...
-    let label = format!(
-        "Card: {:?}    Driver Version: {}    CUDA Version: {}",
-        card,
-        driver,
-        cuda_v / 1000.0
-    );
-
+fn draw_misc<'d>(gpu: &'d GpuInfo<'d>) -> Paragraph<'d> {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         "Misc",
         Style::default()
@@ -216,10 +188,11 @@ fn draw_misc<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
             .add_modifier(Modifier::BOLD),
     ));
 
-    let spanned_label = Span::styled(label, Style::new().white().bold());
+    let spanned_label = Span::styled(&gpu.misc, Style::new().white().bold());
     let paragraph = Paragraph::new(spanned_label)
         .block(block)
         .wrap(Wrap { trim: true });
+
     paragraph
 }
 
@@ -246,10 +219,10 @@ fn draw_core_utilisation<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
 
 fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
     let core_clock = gpu.inner.clock(Clock::Graphics, ClockId::Current);
-    let max_clock = gpu.inner.clock(Clock::Graphics, ClockId::CustomerMaxBoost);
-    let percent = core_clock.map_or(0, |ur| (ur / max_clock.unwrap_or(1)) as u16);
+    let percent = core_clock.map_or(0, |ur| (ur / gpu.max_core_clock) as u16);
     trace!("core_clock {}", percent);
-    let label = format!("{}MHz", percent);
+
+    let label = format!("{}/{}MHz", percent, gpu.max_core_clock);
     let spanned_label = Span::styled(label, Style::new().white().bold());
 
     let core_guage = Gauge::default()
