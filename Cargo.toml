@@ -1,6 +1,6 @@
 [package]
 name = "nvtop"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = """
 `nvtop`: An NVIDIA SMI'esk GPU Monitoring tool for your terminal.
