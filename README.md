@@ -39,26 +39,14 @@ _Why?_ Because, not all of the functionality from [`nvmlt-sys`](https://crates.i
 
 ## Installation
 
-### Install from Git
+### Install via Cargo
 
-You can install `nvtop` directly from the Git repository. Follow these steps:
+You can install `nvtop` directly from Cargo. Follow these steps:
 
-1. Clone the `nvtop` repository to your local machine:
-
-   ```bash
-   git clone https://github.com/alphastrata/nvtop.git
-   ```
-
-1. Change to the `nvtop` directory:
+1. Build and install `nvtop` from GitHub:
 
    ```bash
-   cd nvtop
-   ```
-
-1. Build and install `nvtop` using Cargo:
-
-   ```bash
-   cargo install --path .
+   cargo install --git https://github.com/alphastrata/nvtop
    ```
 
 ### Install from Source
