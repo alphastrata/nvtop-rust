@@ -1,18 +1,18 @@
-use crate::gpu::GpuInfo;
+use nvml_wrapper::{enum_wrappers::device::TemperatureSensor, struct_wrappers::device::MemoryInfo};
 
-use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
+use ratatui::{prelude::*, widgets::*};
 use ratatui::{
     prelude::{CrosstermBackend, Terminal},
     widgets::Paragraph,
 };
-use std::{default, time::Duration};
 
-use ratatui::{prelude::*, widgets::*};
+use std::time::Duration;
 
-use self::stylings::calculate_severity;
+use crate::stylers::calculate_severity;
+use crate::{errors, gpu::GpuInfo};
 pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 
-pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::error::Error>> {
+pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
 
@@ -53,13 +53,8 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
 
                 // Chunk |A|
                 // Core:
-                let percent = gpu
-                    .inner
-                    .utilization_rates()
-                    .unwrap()
-                    .gpu
-                    .try_into()
-                    .unwrap();
+                let utilisation_rates = gpu.inner.utilization_rates();
+                let percent = utilisation_rates.map_or(0, |ur| ur.gpu as u16);
 
                 let core_guage = Gauge::default()
                     .block(
@@ -82,6 +77,7 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
                 let card = gpu.inner.brand().unwrap();
                 let driver = gpu.inner.nvml().sys_driver_version().unwrap();
                 let cuda_v = gpu.inner.nvml().sys_cuda_driver_version().unwrap();
+                //TODO: self.brand self.sys_driver, sys_cuda // because these never change we may as well get them at init and use em everywhere...
                 let label = format!(
                     "Card: {:?}    Driver Version: {}    CUDA Version: {}",
                     card,
@@ -119,11 +115,19 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
 
                 // Chunk B
                 // Memory:
-                let mem_info = gpu.inner.memory_info().unwrap();
+                let mem_info = gpu.inner.memory_info().map_or(
+                    MemoryInfo {
+                        free: 0,
+                        total: 0, //TODO: This never changes so put in self
+                        used: 0,
+                    },
+                    |mem_info| mem_info,
+                );
 
-                let mem_used = mem_info.used as f64 / 1_073_741_824.0;
+                let mem_used = mem_info.used as f64 / 1_073_741_824.0; // as GB
                 let mem_total = mem_info.total as f64 / 1_073_741_824.0;
                 let mem_percentage = mem_used / mem_total; // Normalize to a value between 0 and 1
+
                 let label = format!("{:.2}/{:.2}GB", mem_percentage, mem_total);
                 let spanned_label = Span::styled(label, Style::new().white().bold());
                 let mem_usage_guage = Gauge::default()
@@ -142,13 +146,17 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
 
                 // Chunk C:
                 // Temp:
-                let temps = gpu.inner.temperature(TemperatureSensor::Gpu).unwrap();
-                let label = format!("{:.2}°C", temps);
+                let gpu_die_temperature = gpu
+                    .inner
+                    .temperature(TemperatureSensor::Gpu)
+                    .map_or(0, |temp| temp);
+
+                let label = format!("{:.2}°C", gpu_die_temperature);
                 let spanned_label = Span::styled(label, Style::new().white().bold());
-                let temp_ratio = (temps as f64 / 100.).clamp(0., 1.0);
+                let temp_ratio = (gpu_die_temperature as f64 / 100.).clamp(0., 1.0);
                 let temp_guage = Gauge::default()
                     .block(Block::default().borders(Borders::ALL).title("Temp"))
-                    .gauge_style(calculate_severity(temps as f32).style_for())
+                    .gauge_style(calculate_severity(gpu_die_temperature as f32).style_for())
                     .label(spanned_label)
                     .set_style(Style::default())
                     .ratio(temp_ratio);
@@ -157,9 +165,8 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
 
                 // Chunk D:
                 // Fanspeed:
-                let temps = gpu.inner.num_fans().unwrap();
+                let temps = gpu.inner.num_fans().map_or(0, |fc| fc);
                 let avg = (0..temps as usize)
-                    .into_iter()
                     .flat_map(|v| gpu.inner.fan_speed(v as u32))
                     .map(|u| u as f64)
                     .sum::<f64>()
@@ -192,65 +199,4 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
     crossterm::terminal::disable_raw_mode()?;
 
     Ok(())
-}
-
-pub mod stylings {
-    use log::trace;
-    use ratatui::prelude::*;
-
-    // Define an enum for severity levels
-    pub enum Severity {
-        Low,
-        Medium,
-        High,
-        Critical,
-    }
-
-    impl Severity {
-        const COLORS: [(u8, u8, u8); 4] = [
-            (244, 11, 104), // Blueish
-            (221, 244, 11), // Greenish
-            (11, 244, 151), // Yellowish
-            (34, 11, 244),  // Pinkish
-        ];
-
-        pub fn style_for(&self) -> Style {
-            // Create styles for each severity level
-            let styles = Self::COLORS
-                .iter()
-                .map(|(r, g, b)| {
-                    Style::default()
-                        .fg(Color::Rgb(*r, *g, *b))
-                        .add_modifier(Modifier::BOLD | Modifier::ITALIC)
-                })
-                .collect::<Vec<Style>>();
-
-            match self {
-                Severity::Low => &styles[0],
-                Severity::Medium => &styles[1],
-                Severity::High => &styles[2],
-                Severity::Critical => &styles[3],
-            }
-            .clone()
-        }
-    }
-
-    /// Work out the %ile that `n` is in out of 0..100
-    pub fn calculate_severity<N>(n: N) -> Severity
-    where
-        N: PartialEq
-            + PartialOrd
-            + std::ops::Div<Output = N>
-            + std::ops::Mul<Output = N>
-            + From<f32>
-            + std::fmt::Display,
-    {
-        // Check which quartile `n` falls into and return the corresponding severity
-        match n {
-            _ if n < N::from(0.6) => Severity::Low,
-            _ if n < N::from(0.75) => Severity::Medium,
-            _ if n < N::from(0.85) => Severity::High,
-            _ => Severity::Critical,
-        }
-    }
 }

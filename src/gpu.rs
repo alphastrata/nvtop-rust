@@ -19,18 +19,18 @@ impl<'d> fmt::Display for GpuInfo<'d> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let meminfo = self.inner.memory_info().unwrap();
         let utilisation = self.inner.utilization_rates().unwrap();
-        write!(f, "Brand: {:?}\n", self.inner.brand())?;
-        write!(f, "core: {:?}%\n", utilisation.gpu)?;
-        write!(f, "mem_used: {:?}\n", meminfo.used as f64 / 1_073_741_824.0)?;
-        write!(f, "mem {:?}%\n", (meminfo.total / meminfo.used))?;
-        write!(
+        writeln!(f, "Brand: {:?}", self.inner.brand())?;
+        writeln!(f, "core: {:?}%", utilisation.gpu)?;
+        writeln!(f, "mem_used: {:?}", meminfo.used as f64 / 1_073_741_824.0)?;
+        writeln!(f, "mem {:?}%", (meminfo.total / meminfo.used))?;
+        writeln!(
             f,
-            "mem_total: {:?}\n",
+            "mem_total: {:?}",
             meminfo.total as f64 / 1_073_741_824.0
         )?;
-        write!(
+        writeln!(
             f,
-            "Temp: {:?}C\n",
+            "Temp: {:?}C",
             self.inner.temperature(TemperatureSensor::Gpu)
         )?;
 
