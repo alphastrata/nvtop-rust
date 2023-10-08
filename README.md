@@ -39,36 +39,24 @@ _Why?_ Because, not all of the functionality from [`nvmlt-sys`](https://crates.i
 
 ## Installation
 
-### Install from Git
+### Install via Cargo
 
-You can install `nvtop` directly from the Git repository. Follow these steps:
+You can install `nvtop` directly from Cargo. Follow these steps:
 
-1. Clone the `nvtop` repository to your local machine:
-
-   ```bash
-   git clone https://github.com/alphastrata/nvtop.git
-   ```
-
-1. Change to the `nvtop` directory:
+1. Build and install `nvtop` from GitHub:
 
    ```bash
-   cd nvtop
+   cargo install --git https://github.com/alphastrata/nvtop
    ```
 
-1. Build and install `nvtop` using Cargo:
+### Build manually
 
-   ```bash
-   cargo install --path .
-   ```
-
-### Install from Source
-
-To install `nvtop` from the source code, you can follow these steps:
+To build `nvtop` from the source code, you can follow these steps:
 
 1. Download the source code or clone the repository to your local machine:
 
    ```bash
-   git clone https://github.com/alphastrata/nvtop.git
+   git clone https://github.com/alphastrata/nvtop
    ```
 
 1. Change to the `nvtop` directory:
@@ -85,12 +73,12 @@ To install `nvtop` from the source code, you can follow these steps:
 
 1. After building, you can find the `nvtop` executable in the `target/release/` directory.
 
-### Install to Path
+#### Install build artifact
 
-To make `nvtop` easily accessible from the command line, you can copy the executable to a directory in your system's `PATH`. For example, you can copy it to `/usr/local/bin`:
+To make `nvtop` easily accessible from the command line, you can copy the executable to a directory in your system's `PATH`. For example, you can copy it to `/usr/local/bin/`:
 
 ```bash
-sudo cp target/release/nvtop /usr/local/bin/
+sudo install -Dm755 target/release/nvtop /usr/local/bin/nvtop
 ```
 
 Now, you can use `nvtop` from anywhere in your terminal.
