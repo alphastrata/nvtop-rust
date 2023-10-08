@@ -5,9 +5,11 @@ use ratatui::{
     prelude::{CrosstermBackend, Terminal},
     widgets::Paragraph,
 };
-use std::time::Duration;
+use std::{default, time::Duration};
 
 use ratatui::{prelude::*, widgets::*};
+
+use self::stylings::calculate_severity;
 pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 
 pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::error::Error>> {
@@ -93,7 +95,11 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
                         .fg(Color::Magenta)
                         .add_modifier(Modifier::BOLD),
                 ));
-                let paragraph = Paragraph::new(label).block(block).wrap(Wrap { trim: true });
+
+                let spanned_label = Span::styled(label, Style::new().white().bold());
+                let paragraph = Paragraph::new(spanned_label)
+                    .block(block)
+                    .wrap(Wrap { trim: true });
                 f.render_widget(paragraph, chunks[1]);
             }
 
@@ -119,6 +125,7 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
                 let mem_total = mem_info.total as f64 / 1_073_741_824.0;
                 let mem_percentage = mem_used / mem_total; // Normalize to a value between 0 and 1
                 let label = format!("{:.2}/{:.2}GB", mem_percentage, mem_total);
+                let spanned_label = Span::styled(label, Style::new().white().bold());
                 let mem_usage_guage = Gauge::default()
                     .block(Block::default().borders(Borders::ALL).title("Memory Usage"))
                     .gauge_style(Style {
@@ -128,7 +135,7 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
                         add_modifier: Modifier::BOLD,
                         sub_modifier: Modifier::UNDERLINED,
                     })
-                    .label(label)
+                    .label(spanned_label)
                     .ratio(mem_percentage.clamp(0., 1.0));
 
                 f.render_widget(mem_usage_guage, chunks[0]);
@@ -137,18 +144,13 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
                 // Temp:
                 let temps = gpu.inner.temperature(TemperatureSensor::Gpu).unwrap();
                 let label = format!("{:.2}°C", temps);
+                let spanned_label = Span::styled(label, Style::new().white().bold());
                 let temp_ratio = (temps as f64 / 100.).clamp(0., 1.0);
                 let temp_guage = Gauge::default()
                     .block(Block::default().borders(Borders::ALL).title("Temp"))
-                    .gauge_style(Style {
-                        fg: Some(Color::LightYellow),
-                        bg: None,
-                        underline_color: Some(Color::Red),
-                        add_modifier: Modifier::BOLD,
-                        sub_modifier: Modifier::UNDERLINED,
-                    })
-                    .label(label)
-                    .style(Style::default())
+                    .gauge_style(calculate_severity(temps as f32).style_for())
+                    .label(spanned_label)
+                    .set_style(Style::default())
                     .ratio(temp_ratio);
 
                 f.render_widget(temp_guage, chunks[1]);
@@ -164,17 +166,12 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
                     / temps as f64;
 
                 let label = format!("{:.2}%", avg);
+                let spanned_label = Span::styled(label, Style::new().white().bold());
                 let fan_guage = Gauge::default()
                     .block(Block::default().borders(Borders::ALL).title("Fan Speed"))
-                    .gauge_style(Style {
-                        fg: Some(Color::LightYellow),
-                        bg: None,
-                        underline_color: Some(Color::Red),
-                        add_modifier: Modifier::BOLD,
-                        sub_modifier: Modifier::UNDERLINED,
-                    })
-                    .label(label)
-                    .style(Style::default())
+                    .gauge_style(calculate_severity(avg).style_for())
+                    .label(spanned_label)
+                    .set_style(Style::default())
                     .ratio((avg / 100.).clamp(0., 1.0));
 
                 f.render_widget(fan_guage, chunks[2]);
@@ -195,4 +192,65 @@ pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), Box<dyn std::err
     crossterm::terminal::disable_raw_mode()?;
 
     Ok(())
+}
+
+pub mod stylings {
+    use log::trace;
+    use ratatui::prelude::*;
+
+    // Define an enum for severity levels
+    pub enum Severity {
+        Low,
+        Medium,
+        High,
+        Critical,
+    }
+
+    impl Severity {
+        const COLORS: [(u8, u8, u8); 4] = [
+            (244, 11, 104), // Blueish
+            (221, 244, 11), // Greenish
+            (11, 244, 151), // Yellowish
+            (34, 11, 244),  // Pinkish
+        ];
+
+        pub fn style_for(&self) -> Style {
+            // Create styles for each severity level
+            let styles = Self::COLORS
+                .iter()
+                .map(|(r, g, b)| {
+                    Style::default()
+                        .fg(Color::Rgb(*r, *g, *b))
+                        .add_modifier(Modifier::BOLD | Modifier::ITALIC)
+                })
+                .collect::<Vec<Style>>();
+
+            match self {
+                Severity::Low => &styles[0],
+                Severity::Medium => &styles[1],
+                Severity::High => &styles[2],
+                Severity::Critical => &styles[3],
+            }
+            .clone()
+        }
+    }
+
+    /// Work out the %ile that `n` is in out of 0..100
+    pub fn calculate_severity<N>(n: N) -> Severity
+    where
+        N: PartialEq
+            + PartialOrd
+            + std::ops::Div<Output = N>
+            + std::ops::Mul<Output = N>
+            + From<f32>
+            + std::fmt::Display,
+    {
+        // Check which quartile `n` falls into and return the corresponding severity
+        match n {
+            _ if n < N::from(0.6) => Severity::Low,
+            _ if n < N::from(0.75) => Severity::Medium,
+            _ if n < N::from(0.85) => Severity::High,
+            _ => Severity::Critical,
+        }
+    }
 }
