@@ -42,7 +42,16 @@ fn main() -> Result<(), NvTopError> {
     trace!("Setting misc = {misc}");
 
     let max_memory_clock: Vec<u32> = device.supported_memory_clocks()?;
-    let max_clock = device.clock(Clock::Graphics, ClockId::CustomerMaxBoost)?;
+    let max_clock = match device.clock(Clock::Graphics, ClockId::CustomerMaxBoost) {
+        Ok(max_clock) => {
+            trace!("CustomerMaxBoost is available!");
+            max_clock
+        }
+        Err(e) => {
+            error!("{e} CustomerMaxBoost is UNAVAILABLE");
+            1
+        }
+    };
 
     let gpu = GpuInfo {
         inner: &device,
