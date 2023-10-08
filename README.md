@@ -33,6 +33,9 @@ ______________________________________________________________________
 
 Before installing `nvtop`, ensure that you have Rust and Cargo (the Rust package manager) installed on your system. You can download and install Rust from the official website: [Rust Downloads](https://www.rust-lang.org/tools/install).
 
+You will also need to at least confirm that `nvidia-smi` (The official NVIDIA tool that this one seeks to mimic) works.
+_Why?_ Because, not all of the functionality from [`nvmlt-sys`](https://crates.io/crates/nvml-sys/versions) the library this app relies on does **not** guarantee all reporting functionality across ALL NVIDIA gpus.
+
 ## Installation
 
 ### Install from Git
