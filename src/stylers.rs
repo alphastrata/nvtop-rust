@@ -11,7 +11,7 @@ pub enum Severity {
 impl Severity {
     const COLORS: [(u8, u8, u8); 4] = [
         (66, 84, 245),  // Blueish
-        (44, 135, 26),  // Greenish
+        (41, 211, 152), // Greenish
         (217, 148, 30), // Orangeish
         (212, 22, 8),   // Reddish
     ];

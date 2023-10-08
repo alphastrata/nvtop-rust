@@ -2,9 +2,11 @@
 
 <center>
 
-![img](https://raw.githubusercontent.com/alphastrata/nvtop/main/assets/icon.jpeg)
+![img](assets/jensen-banner.png)
 
 An NVIDIA SMI'esk GPU Monitoring tool for your terminal.
+
+_art by stable-diffusion + Maz_
 
 </center>
 
