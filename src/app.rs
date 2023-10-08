@@ -14,11 +14,12 @@ use crate::stylers::calculate_severity;
 use crate::{errors, gpu::GpuInfo};
 pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 
-pub fn run(gpu: GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
+pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stderr()))?;
+    trace!("crossterm initialisation successful");
 
     loop {
         terminal.draw(|f| {
