@@ -24,7 +24,7 @@ Keywords = [
   "Command-line tool",
 ]
 authors = ["jer, alphastrata@gmail.com"]
-documentation = "github.com/alphastrata/nvtop"
+documentation = "https://www.github.com/alphastrata/nvtop"
 license = "MIT"
 homepage = "https://www.jeremyfwebb.ninja"
 publish = true
