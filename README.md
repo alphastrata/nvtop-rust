@@ -2,7 +2,7 @@
 
 <center>
 
-![img](assets/icon.jpeg)
+![img](https://raw.githubusercontent.com/alphastrata/nvtop/main/assets/icon.jpeg)
 
 An NVIDIA SMI'esk GPU Monitoring tool for your terminal.
 
@@ -123,6 +123,6 @@ because \_this:
 ```
 
 is **boring**, and this:
-![nvtop](assets/screenshot.png)
+![nvtop](https://raw.githubusercontent.com/alphastrata/nvtop/main/assets/screenshot.png)
 
 is **fun!**
