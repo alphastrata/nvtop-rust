@@ -10,10 +10,10 @@ pub enum Severity {
 
 impl Severity {
     const COLORS: [(u8, u8, u8); 4] = [
-        (244, 11, 104), // Blueish
-        (221, 244, 11), // Greenish
-        (11, 244, 151), // Yellowish
-        (34, 11, 244),  // Pinkish
+        (66, 84, 245),  // Blueish
+        (44, 135, 26),  // Greenish
+        (217, 148, 30), // Orangeish
+        (212, 22, 8),   // Reddish
     ];
 
     pub fn style_for(&self) -> Style {
@@ -28,10 +28,10 @@ impl Severity {
             .collect::<Vec<Style>>();
 
         *match self {
-            Severity::Low => &styles[0],
-            Severity::Medium => &styles[1],
-            Severity::High => &styles[2],
-            Severity::Critical => &styles[3],
+            Severity::Low => &styles[0],      // Pink
+            Severity::Medium => &styles[1],   // Green
+            Severity::High => &styles[2],     // Orange
+            Severity::Critical => &styles[3], //Red
         }
     }
 }
@@ -39,18 +39,14 @@ impl Severity {
 /// Work out the %ile that `n` is in out of 0..100
 pub fn calculate_severity<N>(n: N) -> Severity
 where
-    N: PartialEq
-        + PartialOrd
-        + std::ops::Div<Output = N>
-        + std::ops::Mul<Output = N>
-        + From<f32>
-        + std::fmt::Display,
+    N: Into<f64>,
 {
-    // Check which quartile `n` falls into and return the corresponding severity
-    match n {
-        _ if n < N::from(0.6) => Severity::Low,
-        _ if n < N::from(0.75) => Severity::Medium,
-        _ if n < N::from(0.85) => Severity::High,
+    let clamped_n = n.into().clamp(0.0, 1.0);
+
+    match clamped_n {
+        _ if clamped_n < 0.40 => Severity::Low,
+        _ if clamped_n < 0.70 => Severity::Medium,
+        _ if clamped_n < 0.80 => Severity::High,
         _ => Severity::Critical,
     }
 }

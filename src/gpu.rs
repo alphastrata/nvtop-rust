@@ -1,10 +1,20 @@
 use std::{fmt, ops::Deref};
 
-use nvml_wrapper::{enum_wrappers::device::TemperatureSensor, Device};
+use nvml_wrapper::{
+    enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
+    Device,
+};
 
 #[derive(Debug)]
 pub struct GpuInfo<'d> {
     pub inner: &'d Device<'d>,
+    pub max_memory_clock: u32,
+    pub max_core_clock: u32,
+    pub card_type: String,
+    pub driver_version: String,
+    pub cuda_version: f32,
+    pub misc: String,
+    pub num_cores: u32,
 }
 
 impl<'d> Deref for GpuInfo<'d> {
@@ -23,41 +33,78 @@ impl<'d> fmt::Display for GpuInfo<'d> {
         writeln!(f, "core: {:?}%", utilisation.gpu)?;
         writeln!(f, "mem_used: {:?}", meminfo.used as f64 / 1_073_741_824.0)?;
         writeln!(f, "mem {:?}%", (meminfo.total / meminfo.used))?;
-        writeln!(
-            f,
-            "mem_total: {:?}",
-            meminfo.total as f64 / 1_073_741_824.0
-        )?;
+        writeln!(f, "mem_total: {:?}", meminfo.total as f64 / 1_073_741_824.0)?;
         writeln!(
             f,
             "Temp: {:?}C",
             self.inner.temperature(TemperatureSensor::Gpu)
         )?;
 
-        // TODO: the other stuff we may want to print...
-
-        // for clock_id in [
-        //     ClockId::Current,
-        //     ClockId::TargetAppClock,
-        //     ClockId::DefaultAppClock,
-        //     ClockId::CustomerMaxBoost,
-        // ]
-        // .into_iter()
-        // {
-        //     [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
-        //         .into_iter()
-        //         .for_each(|clock_type| {
-        //             match self.device.clock(clock_type.clone(), clock_id.clone()) {
-        //                 Ok(value) => {
-        //                     write!(f, "Clock {:?} for {:?}: {}\n", clock_type, clock_id, value)
-        //                         .unwrap_or_default()
-        //                 }
-        //                 Err(_err) => {
-        //                     log::error!("{_err}")
-        //                 }
-        //             }
-        //         });
-        // }
+        [
+            ClockId::Current,
+            ClockId::TargetAppClock,
+            ClockId::DefaultAppClock,
+            ClockId::CustomerMaxBoost,
+        ]
+        .into_iter()
+        .for_each(|clock_id| {
+            [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
+                .into_iter()
+                .for_each(|clock_type| {
+                    match self.inner.clock(clock_type.clone(), clock_id.clone()) {
+                        Ok(value) => {
+                            writeln!(f, "Clock {:?} for {:?}: {}", clock_type, clock_id, value)
+                                .unwrap_or_default()
+                        }
+                        Err(err) => {
+                            let formatted = format!(
+                                "clock_type={:?}\t\tclock_id={:?} {}",
+                                clock_type, clock_id, err,
+                            );
+                            log::error!("{formatted}")
+                        }
+                    }
+                });
+        });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nvml_wrapper::{
+        enum_wrappers::device::{Clock, ClockId},
+        Nvml,
+    };
+
+    #[ignore = ""]
+    #[test]
+    fn clock_memory() {
+        let nvml = Nvml::init().unwrap();
+        // Get the first `Device` (GPU) in the system
+        let device = nvml.device_by_index(0).unwrap();
+
+        (0..10).for_each(|_| {
+            [
+                ClockId::Current,
+                ClockId::TargetAppClock,
+                ClockId::DefaultAppClock,
+                ClockId::CustomerMaxBoost,
+            ]
+            .into_iter()
+            .for_each(|clock_id| {
+                [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
+                    .into_iter()
+                    .for_each(|clock_type| {
+                        match device.clock(clock_type.clone(), clock_id.clone()) {
+                            Ok(value) => {
+                                println!("Clock: {:?} for {:?}: {}\n", clock_type, clock_id, value);
+                            }
+                            Err(_err) => {}
+                        }
+                    });
+            });
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        });
     }
 }

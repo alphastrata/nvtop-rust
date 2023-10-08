@@ -1,27 +1,12 @@
 use std::fmt::Display;
-
 use thiserror::Error;
 
-// #[derive(Error, Debug)]
-// pub enum DataStoreError {
-//     #[error("data store disconnected")]
-//     Disconnect(#[from] io::Error),
-//     #[error("the data for key `{0}` is not available")]
-//     Redaction(String),
-//     #[error("invalid header (expected {expected:?}, found {found:?})")]
-//     InvalidHeader {
-//         expected: String,
-//         found: String,
-//     },
-//     #[error("unknown data store error")]
-//     Unknown,
-// }
-
+/// Our error type, wrapping miscellaneous errors from the libraries used.
 #[derive(Error, Debug)]
 pub enum NvTopError {
-    #[error(transparent)]
-    NvmlError(nvml_wrapper::error::NvmlError),
+    Nvml(#[from] nvml_wrapper::error::NvmlError),
     Io(#[from] std::io::Error),
+    Fern(#[from] fern::InitError),
 }
 
 impl Display for NvTopError {

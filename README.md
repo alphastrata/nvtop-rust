@@ -2,7 +2,7 @@
 
 <center>
 
-![img](assets/icon.jpeg)
+![img](https://raw.githubusercontent.com/alphastrata/nvtop/main/assets/icon.jpeg)
 
 An NVIDIA SMI'esk GPU Monitoring tool for your terminal.
 
@@ -14,6 +14,7 @@ An NVIDIA SMI'esk GPU Monitoring tool for your terminal.
 - [prerequisites](#prerequisites)
 - [installation](#Installation)
 - [why](#why)
+- [troubleshooting](#troubleshooting)
 
 `nvtop` is a command-line utility that provides a replacement for some of the output from `nvidia-smi` (System Management Interface).
 It offers real-time monitoring and visualization of GPU information: Core Clock, Temps, Fanspeed and Memory Usage.
@@ -123,6 +124,15 @@ because \_this:
 ```
 
 is **boring**, and this:
-![nvtop](assets/screenshot.png)
+![nvtop](https://raw.githubusercontent.com/alphastrata/nvtop/main/assets/screenshot.png)
 
 is **fun!**
+
+
+
+
+______________________________________________________________________
+
+# Troubleshooting:
+If something ain't working please feel free to open an issue, before doing so however, the app has the ability to do some verbose logging (to disk) -- please enable that like so:
+```nvtop --logging```
