@@ -25,14 +25,25 @@ ______________________________________________________________________
 
 # Usage:
 
+- Control the rate at which you're polling the GPU(s) for info:
+
 ```shell
 # Monitor the GPU and system with a 1-second update interval
 nvtop --delay 1000
 ```
 
+- Go with the default 1s update speed :
+
 ```shell
 # 1-second just so happens to be the default so, if you're happy with that you can just run:
 nvtop
+```
+
+- If you're having trouble, send us a log!
+
+```shell
+# The app can log debug info
+nvtop --log <PATH TO CREATE A LOGFILE @>
 ```
 
 ______________________________________________________________________
@@ -126,11 +137,23 @@ is **boring**, and this:
 
 is **fun!**
 
-
-
-
 ______________________________________________________________________
 
 # Troubleshooting:
+
 If something ain't working please feel free to open an issue, before doing so however, the app has the ability to do some verbose logging (to disk) -- please enable that like so:
-```nvtop --logging```
+`nvtop --log`
+This, by default will make an `nvtop.log` wherever your binary is -- please include that with your bug report (there's Issue templates).
+
+______________________________________________________________________
+
+# Contributing:
+
+- All are welcome, I'm not really too fussy about coding standards etc (when I'm not at work :p)
+
+### Advice for contributors:
+
+- if you touch the readme, please format it with `mdformat` (`pip install mdformat`).
+- if you touch python scrpits, please format them with `black` (`pip install black`).
+- always run these `cargo test`, `cargo check`, `cargo clippy` -- please don't make PRs until any issues those tools flag are resolved.
+- if this is your first time contributing to open source, _wow! thank you_.

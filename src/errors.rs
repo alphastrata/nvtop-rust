@@ -6,7 +6,6 @@ use thiserror::Error;
 pub enum NvTopError {
     Nvml(#[from] nvml_wrapper::error::NvmlError),
     Io(#[from] std::io::Error),
-    Fern(#[from] fern::InitError),
 }
 
 impl Display for NvTopError {
