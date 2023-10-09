@@ -126,17 +126,16 @@ is **boring**, and this:
 
 is **fun!**
 
-
-
 ______________________________________________________________________
 
 # Troubleshooting:
+
 If something ain't working please feel free to open an issue, before doing so however, the app has the ability to do some verbose logging (to disk) -- please enable that like so:
-```nvtop --log```
+`nvtop --log`
 This, by default will make an `nvtop.log` wherever your binary is -- please include that with your bug report (there's Issue templates).
 
-
-
 ______________________________________________________________________
+
 # Contributing:
+
 - All are welcome.
