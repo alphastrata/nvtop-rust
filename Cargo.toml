@@ -3,7 +3,7 @@ name = "nvtop"
 version = "0.1.1"
 edition = "2021"
 description = """ nvtop: An NVIDIA SMI'esk GPU Monitoring tool for your terminal. """
-Keywords = [
+keywords = [
   "Real-time monitoring",
   "GPU",
   "NVIDIA",

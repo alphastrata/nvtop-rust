@@ -1,7 +1,10 @@
-use log::trace;
+use log::{debug, trace};
 use nvml_wrapper::enum_wrappers::device::{Clock, ClockId};
+use nvml_wrapper::error::NvmlError;
+use nvml_wrapper::struct_wrappers::device::PciInfo;
 use nvml_wrapper::{enum_wrappers::device::TemperatureSensor, struct_wrappers::device::MemoryInfo};
 
+use ratatui::symbols::DOT;
 use ratatui::{prelude::*, widgets::*};
 use ratatui::{
     prelude::{CrosstermBackend, Terminal},
@@ -15,21 +18,62 @@ use crate::stylers::calculate_severity;
 use crate::{errors, gpu::GpuInfo};
 pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 
-pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
+pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stderr()))?;
     trace!("crossterm initialisation successful");
 
+    let mut gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+
+    let mut selected_gpu: usize = 0;
+
     loop {
         _ = terminal.draw(|f| {
-            f.render_widget(Paragraph::new("q to quit"), f.size());
+            let gpu = &gpu_list[selected_gpu];
 
-            let top_chunk = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(100)])
-                .split(f.size());
+            // draw tab bar if more than one device is connected
+            let mid_area = if gpu_list.len() == 1 {
+                let layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Min(0), Constraint::Length(1)])
+                    .split(f.size());
+
+                f.render_widget(Paragraph::new("q to quit, p to rescan devices"), layout[1]);
+
+                layout[0]
+            } else {
+                let layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(1),
+                        Constraint::Min(0),
+                        Constraint::Length(1),
+                    ])
+                    .split(f.size());
+
+                f.render_widget(
+                    Tabs::new(
+                        gpu_list
+                            .iter()
+                            .map(|gpu| format!("[{}] {}", gpu.index, gpu.card_type))
+                            .collect(),
+                    )
+                    .select(selected_gpu)
+                    .style(Style::default().fg(Color::Green))
+                    .highlight_style(Style::default().fg(Color::Green).bold())
+                    .divider(DOT),
+                    layout[0],
+                );
+
+                f.render_widget(
+                    Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices"),
+                    layout[2],
+                );
+
+                layout[1]
+            };
 
             // Outermost Block, which draws the green border aound the whole UI.
             let block = Block::default()
@@ -40,7 +84,7 @@ pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::
                 .border_style(Style::default().fg(Color::Green))
                 .border_type(BorderType::Rounded)
                 .style(Style::default());
-            f.render_widget(block, top_chunk[0]);
+            f.render_widget(block, mid_area);
 
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -59,15 +103,15 @@ pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::
                     .split(chunks[0]);
 
                 // Core:
-                let core_guage = draw_core_utilisation(&gpu);
-                f.render_widget(core_guage, chunks[0]);
+                let core_gauge = draw_core_utilisation(gpu);
+                f.render_widget(core_gauge, chunks[0]);
 
                 // Core Clock:
-                let core_guage = draw_core_clock(&gpu).unwrap();
-                f.render_widget(core_guage, chunks[1]);
+                let core_gauge = draw_core_clock(gpu).unwrap();
+                f.render_widget(core_gauge, chunks[1]);
 
                 // Misc:
-                let paragraph = draw_misc(&gpu);
+                let paragraph = draw_misc(gpu);
                 f.render_widget(paragraph, chunks[2]);
             }
 
@@ -83,32 +127,58 @@ pub fn run<'d>(gpu: &'d GpuInfo, delay: Duration) -> anyhow::Result<(), errors::
                     .split(chunks[1]);
 
                 // Memory:
-                let mem_usage_guage = draw_memory_usage(&gpu);
-                f.render_widget(mem_usage_guage, chunks[0]);
+                let mem_usage_gauge = draw_memory_usage(gpu);
+                f.render_widget(mem_usage_gauge, chunks[0]);
 
                 // Temp:
-                let temp_guage = draw_gpu_die_temp(&gpu);
-                f.render_widget(temp_guage, chunks[1]);
+                let temp_gauge = draw_gpu_die_temp(gpu);
+                f.render_widget(temp_gauge, chunks[1]);
 
                 // Fanspeed:
-                let fan_guage = draw_fan_speed(&gpu);
-                f.render_widget(fan_guage, chunks[2]);
+                let fan_gauge = draw_fan_speed(gpu);
+                f.render_widget(fan_gauge, chunks[2]);
             }
-
-            ()
         })?;
 
         if crossterm::event::poll(std::time::Duration::from_millis(250))? {
             if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                if key.code == crossterm::event::KeyCode::Char('q') {
-                    break;
+                use crossterm::event::KeyCode;
+
+                match key.code {
+                    KeyCode::Char('q') => break,
+                    KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => {
+                        selected_gpu = usize::from(n - 1)
+                    }
+                    KeyCode::Char('p') => {
+                        // re-scan pci tree to let driver discover new devices (only works as sudo)
+                        match nvml.discover_gpus(PciInfo {
+                            bus: 0,
+                            bus_id: "".into(),
+                            device: 0,
+                            domain: 0,
+                            pci_device_id: 0,
+                            pci_sub_system_id: Some(0),
+                        }) {
+                            Ok(()) => debug!("Re-scanned PCI tree"),
+                            Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
+                                debug!("Failed to re-scan PCI tree: {e}");
+                            }
+                            Err(e) => return Err(e.into()),
+                        }
+
+                        // re-scan for devices
+                        gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+                        if selected_gpu >= gpu_list.len() {
+                            selected_gpu = 0;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
 
         // primitive rate limiting.
         std::thread::sleep(delay);
-        ()
     }
 
     crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)?;

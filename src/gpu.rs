@@ -1,13 +1,22 @@
-use std::{fmt, ops::Deref};
+use std::{
+    fmt,
+    io::{self, ErrorKind},
+    ops::Deref,
+};
 
+use log::{error, trace};
 use nvml_wrapper::{
     enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
-    Device,
+    error::NvmlError,
+    Device, Nvml,
 };
+
+use crate::errors::NvTopError;
 
 #[derive(Debug)]
 pub struct GpuInfo<'d> {
-    pub inner: &'d Device<'d>,
+    pub index: u32,
+    pub inner: Device<'d>,
     pub max_memory_clock: u32,
     pub max_core_clock: u32,
     pub card_type: String,
@@ -17,15 +26,51 @@ pub struct GpuInfo<'d> {
     pub num_cores: u32,
 }
 
+impl<'d> GpuInfo<'d> {
+    pub fn from_device(index: u32, device: Device<'d>) -> Result<Self, NvmlError> {
+        // Do some setup for things that will _not_ change, i.e driver version etc.
+        let card_type = format!("{:?}", device.brand()?);
+        let driver_version = device.nvml().sys_driver_version()?;
+        let cuda_version = device.nvml().sys_cuda_driver_version()? as f32;
+
+        let misc = format!(
+            "Card: {:?}    Driver Version: {}    CUDA Version: {}",
+            card_type,
+            driver_version,
+            cuda_version / 1000.0
+        );
+        trace!("Setting misc = {misc}");
+
+        // dbg!(
+        //     dev.max_clock_info(Clock::Graphics)?,
+        //     dev.max_clock_info(Clock::Video)?,
+        //     dev.max_clock_info(Clock::SM)?,
+        //     dev.max_clock_info(Clock::Memory)?,
+        // );
+
+        Ok(GpuInfo {
+            max_memory_clock: device.max_clock_info(Clock::Memory)?,
+            max_core_clock: device.max_clock_info(Clock::Graphics)?,
+            num_cores: device.num_cores()?,
+            card_type,
+            driver_version,
+            cuda_version,
+            misc,
+            index,
+            inner: device,
+        })
+    }
+}
+
 impl<'d> Deref for GpuInfo<'d> {
-    type Target = &'d Device<'d>;
+    type Target = Device<'d>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<'d> fmt::Display for GpuInfo<'d> {
+impl fmt::Display for GpuInfo<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let meminfo = self.inner.memory_info().unwrap();
         let utilisation = self.inner.utilization_rates().unwrap();
@@ -67,6 +112,37 @@ impl<'d> fmt::Display for GpuInfo<'d> {
                 });
         });
         Ok(())
+    }
+}
+
+pub fn list_available_gpus(nvml: &Nvml) -> Result<Vec<GpuInfo<'_>>, NvTopError> {
+    let count = nvml.device_count()?;
+    let mut gpu_list = Vec::with_capacity(count as usize);
+
+    for i in 0..count {
+        match nvml.device_by_index(i) {
+            Ok(dev) => {
+                let gpu = GpuInfo::from_device(i, dev)?;
+                trace!("Compatible GPU found at [{i}]: {gpu}");
+                gpu_list.push(gpu);
+            }
+            Err(
+                err @ (NvmlError::InsufficientPower
+                | NvmlError::NoPermission
+                | NvmlError::IrqIssue
+                | NvmlError::GpuLost),
+            ) => {
+                error!("Failed to init device [{i}]: {err}");
+                continue; // carry on
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    if gpu_list.is_empty() {
+        Err(io::Error::new(ErrorKind::NotFound, "No compatible GPU detected").into())
+    } else {
+        Ok(gpu_list)
     }
 }
 
