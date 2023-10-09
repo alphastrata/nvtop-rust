@@ -116,7 +116,7 @@ pub fn try_init_gpus<'n>(
         match nvml.device_by_index(i) {
             Ok(dev) => {
                 let gpu = GpuInfo::from_device(i, dev)?;
-                lh.error("Compatible GPU found at [{i}]: {gpu}");
+                lh.error(&format!("Compatible GPU found at [{i}]: {gpu}"));
                 gpu_list.push(gpu);
             }
             Err(

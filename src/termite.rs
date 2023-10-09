@@ -70,24 +70,24 @@ impl LoggingHandle {
 
     #[inline(always)]
     fn log_error(log_path: &Path, msg: &str) {
-        let log_line = format!("ERROR [{}][{}] {}", std::file!(), std::line!(), msg);
+        let log_line = format!(" ERROR {}\n", msg);
         Self::write_to_log(log_path, &log_line);
     }
     #[inline(always)]
     fn log_info(log_path: &Path, msg: &str) {
-        let log_line = format!("ERROR [{}][{}] {}", std::file!(), std::line!(), msg);
+        let log_line = format!(" INFO  {}\n", msg);
         Self::write_to_log(log_path, &log_line);
     }
 
     #[inline(always)]
     fn log_debug(log_path: &Path, msg: &str) {
-        let log_line = format!("ERROR [{}][{}] {}", std::file!(), std::line!(), msg);
+        let log_line = format!(" DEBUG {}\n", msg);
         Self::write_to_log(log_path, &log_line);
     }
 
     #[inline(always)]
     fn log_warn(log_path: &Path, msg: &str) {
-        let log_line = format!("ERROR [{}][{}] {}", std::file!(), std::line!(), msg);
+        let log_line = format!(" WARN {}\n", msg);
         Self::write_to_log(log_path, &log_line);
     }
 
