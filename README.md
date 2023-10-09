@@ -25,14 +25,22 @@ ______________________________________________________________________
 
 # Usage:
 
+- Control the rate at which you're polling the GPU(s) for info:
 ```shell
 # Monitor the GPU and system with a 1-second update interval
 nvtop --delay 1000
 ```
 
+- Go with the default 1s update speed :
 ```shell
 # 1-second just so happens to be the default so, if you're happy with that you can just run:
 nvtop
+```
+
+- If you're having trouble, send us a log!
+```shell
+# The app can log debug info
+nvtop --log <PATH TO CREATE A LOGFILE @>
 ```
 
 ______________________________________________________________________
