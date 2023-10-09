@@ -205,7 +205,7 @@ fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         false => avg
     };
     let label = match avg.is_nan() {
-        true => "No fan".to_string(),
+        true => "No fans".to_string(),
         false => format!("{:.1}%", avg)
     };
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
