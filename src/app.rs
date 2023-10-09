@@ -154,7 +154,9 @@ pub fn run(
                         selected_gpu = usize::from(n - 1)
                     }
                     KeyCode::Char('p') => {
-                        // re-scan pci tree to let driver discover new devices (only works as sudo)
+                        //commented out because discover_gpus not implemented
+                        
+                        /* // re-scan pci tree to let driver discover new devices (only works as sudo)
                         match nvml.discover_gpus(PciInfo {
                             bus: 0,
                             bus_id: "".into(),
@@ -174,7 +176,7 @@ pub fn run(
                         gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
                         if selected_gpu >= gpu_list.len() {
                             selected_gpu = 0;
-                        }
+                        } */
                     }
                     _ => {}
                 }
@@ -198,9 +200,14 @@ fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         .map(|u| u as f64)
         .sum::<f64>()
         / temps as f64;
-
-    let percentage = (avg / 100.).clamp(0., 1.0);
-    let label = format!("{:.1}%", avg);
+    let percentage = match avg.is_nan() {
+        true => 0.0,
+        false => avg
+    };
+    let label = match avg.is_nan() {
+        true => "No fan".to_string(),
+        false => format!("{:.1}%", avg)
+    };
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
 
     Gauge::default()
