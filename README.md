@@ -152,6 +152,7 @@ ______________________________________________________________________
 - All are welcome, I'm not really too fussy about coding standards etc (when I'm not at work :p)
 
 ### Advice for contributors:
+
 - if you touch the readme, please format it with `mdformat` (`pip install mdformat`).
 - if you touch python scrpits, please format them with `black` (`pip install black`).
 - always run these `cargo test`, `cargo check`, `cargo clippy` -- please don't make PRs until any issues those tools flag are resolved.
