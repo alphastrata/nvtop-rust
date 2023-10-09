@@ -25,9 +25,14 @@ ______________________________________________________________________
 
 # Usage:
 
-```
+```shell
 # Monitor the GPU and system with a 1-second update interval
 nvtop --delay 1000
+```
+
+```shell
+# 1-second just so happens to be the default so, if you're happy with that you can just run:
+nvtop
 ```
 
 ______________________________________________________________________
@@ -48,6 +53,8 @@ You can install `nvtop` directly from Cargo. Follow these steps:
 1. Build and install `nvtop` from GitHub:
 
    ```bash
+   cargo install nvtop
+   # or for the latest you can use a git url, 
    cargo install --git https://github.com/alphastrata/nvtop
    ```
 
@@ -71,6 +78,7 @@ To build `nvtop` from the source code, you can follow these steps:
 
    ```bash
    cargo build --release
+   # the binary will be available at ./target/release/nvtop
    ```
 
 1. After building, you can find the `nvtop` executable in the `target/release/` directory.
