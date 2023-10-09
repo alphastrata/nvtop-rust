@@ -1,4 +1,3 @@
-use log::{debug, trace};
 use nvml_wrapper::enum_wrappers::device::{Clock, ClockId};
 use nvml_wrapper::error::NvmlError;
 use nvml_wrapper::struct_wrappers::device::PciInfo;
@@ -15,10 +14,15 @@ use std::time::Duration;
 
 use crate::errors::NvTopError;
 use crate::stylers::calculate_severity;
+use crate::termite::LoggingHandle;
 use crate::{errors, gpu::GpuInfo};
 pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 
-pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
+pub fn run(
+    nvml: nvml_wrapper::Nvml,
+    delay: Duration,
+    lh: LoggingHandle,
+) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
 
