@@ -21,15 +21,15 @@ pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 pub fn run(
     nvml: nvml_wrapper::Nvml,
     delay: Duration,
-    lh: LoggingHandle,
+    lh: &LoggingHandle,
 ) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stderr()))?;
-    trace!("crossterm initialisation successful");
+    lh.debug("crossterm initialisation successful");
 
-    let mut gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+    let mut gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
 
     let mut selected_gpu: usize = 0;
 
@@ -163,15 +163,15 @@ pub fn run(
                             pci_device_id: 0,
                             pci_sub_system_id: Some(0),
                         }) {
-                            Ok(()) => debug!("Re-scanned PCI tree"),
+                            Ok(()) => lh.debug("Re-scanned PCI tree"),
                             Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
-                                debug!("Failed to re-scan PCI tree: {e}");
+                                lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
                             }
                             Err(e) => return Err(e.into()),
                         }
 
                         // re-scan for devices
-                        gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+                        gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
                         if selected_gpu >= gpu_list.len() {
                             selected_gpu = 0;
                         }

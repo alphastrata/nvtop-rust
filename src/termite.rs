@@ -55,25 +55,38 @@ impl LoggingHandle {
         LoggingHandle { sender: tx }
     }
 
+    pub fn error(&self, msg: &str) {
+        _ = self.sender.send(LogType::Error(msg.to_string()));
+    }
+    pub fn info(&self, msg: &str) {
+        _ = self.sender.send(LogType::Info(msg.to_string()));
+    }
+    pub fn debug(&self, msg: &str) {
+        _ = self.sender.send(LogType::Debug(msg.to_string()));
+    }
+    pub fn warn(&self, msg: &str) {
+        _ = self.sender.send(LogType::Warn(msg.to_string()));
+    }
+
     #[inline(always)]
-    pub fn log_error(log_path: &Path, msg: &str) {
+    fn log_error(log_path: &Path, msg: &str) {
         let log_line = format!("ERROR [{}][{}] {}", std::file!(), std::line!(), msg);
         Self::write_to_log(log_path, &log_line);
     }
     #[inline(always)]
-    pub fn log_info(log_path: &Path, msg: &str) {
+    fn log_info(log_path: &Path, msg: &str) {
         let log_line = format!("ERROR [{}][{}] {}", std::file!(), std::line!(), msg);
         Self::write_to_log(log_path, &log_line);
     }
 
     #[inline(always)]
-    pub fn log_debug(log_path: &Path, msg: &str) {
+    fn log_debug(log_path: &Path, msg: &str) {
         let log_line = format!("ERROR [{}][{}] {}", std::file!(), std::line!(), msg);
         Self::write_to_log(log_path, &log_line);
     }
 
     #[inline(always)]
-    pub fn log_warn(log_path: &Path, msg: &str) {
+    fn log_warn(log_path: &Path, msg: &str) {
         let log_line = format!("ERROR [{}][{}] {}", std::file!(), std::line!(), msg);
         Self::write_to_log(log_path, &log_line);
     }
@@ -83,7 +96,7 @@ impl LoggingHandle {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_path).expect(&format!("Unable to create {}.\nAs a result of this we cannot write logs. So the app will crash.", log_path.display()));
+            .open(log_path).unwrap_or_else(|_| panic!("Unable to create {}.\nAs a result of this we cannot write logs. So the app will crash.", log_path.display()));
 
         // Write the message to the log file
         file.write_all(msg.as_bytes())

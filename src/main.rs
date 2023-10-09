@@ -20,10 +20,10 @@ fn main() -> Result<(), NvTopError> {
 
     // Init the GPU management-layer
     let nvml = Nvml::init()?;
-    trace!("Nvml init success");
+    lh.debug("Nvml init success");
 
-    if let Err(e) = run(nvml, Duration::from_millis(args.delay), lh) {
-        error!("app::run() -> {e}");
+    if let Err(e) = run(nvml, Duration::from_millis(args.delay), &lh) {
+        lh.error(&format!("app::run() -> {e}"));
     }
 
     Ok(())
