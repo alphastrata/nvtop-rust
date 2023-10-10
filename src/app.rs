@@ -32,7 +32,9 @@ pub fn run(
     let mut gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
 
     let mut selected_gpu: usize = 0;
-    let mut have_fans: bool = true;
+    let mut have_fans: bool = gpu_list
+        .iter()
+        .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
 
     loop {
         _ = terminal.draw(|f| {
@@ -145,12 +147,8 @@ pub fn run(
 
                 // Fan speed:
                 if have_fans {
-                    match draw_fan_speed(gpu) {
-                        Ok(gauge) => {
-                            f.render_widget(gauge, chunks[2]);
-                        }
-                        Err(_) => have_fans = false,
-                    }
+                    let gauge = draw_fan_speed(gpu);
+                    f.render_widget(gauge, chunks[2]);                  
                 }
             }
         })?;
@@ -164,9 +162,10 @@ pub fn run(
                     KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => {
                         selected_gpu = usize::from(n - 1)
                     }
+
+                    #[cfg(target_os = "linux")]
                     KeyCode::Char('p') => {
                         // re-scan pci tree to let driver discover new devices (only works as sudo)
-                        #[cfg(target_os = "linux")]
                         match nvml.discover_gpus(PciInfo {
                             bus: 0,
                             bus_id: "".into(),
@@ -175,13 +174,15 @@ pub fn run(
                             pci_device_id: 0,
                             pci_sub_system_id: Some(0),
                         }) {
-                            Ok(()) => lh.debug("Re-scanned PCI tree"),
+                            Ok(()) => {
+                                lh.debug("Re-scanned PCI tree");
+                                have_fans = true;
+                            }
                             Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
                                 lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
                             }
                             Err(e) => return Err(e.into()),
                         }
-
                         // re-scan for devices
                         gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
                         if selected_gpu >= gpu_list.len() {
@@ -203,7 +204,7 @@ pub fn run(
     Ok(())
 }
 
-fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, ()> {
+fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
     let temps = gpu.inner.num_fans().map_or(0, |fc| fc);
     let avg = (0..temps as usize)
         .flat_map(|v| gpu.inner.fan_speed(v as u32))
@@ -211,20 +212,16 @@ fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, ()> {
         .sum::<f64>()
         / temps as f64;
 
-    if avg.is_nan() {
-        return Err(());
-    }
-
     let percentage = (avg / 100.).clamp(0., 1.0);
     let label = format!("{:.1}%", avg);
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
 
-    Ok(Gauge::default()
+    Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Fan Speed"))
         .gauge_style(calculate_severity(percentage).style_for())
         .label(spanned_label)
         .set_style(Style::default())
-        .ratio(percentage))
+        .ratio(percentage)
 }
 
 fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
