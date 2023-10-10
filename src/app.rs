@@ -180,8 +180,12 @@ pub fn run(
                             pci_sub_system_id: Some(0),
                         }) {
                             Ok(()) => {
+                                have_fans = gpu_list
+                                    .iter()
+                                    .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
+
+                                lh.debug(&format!("GPU has fans = {}", have_fans));
                                 lh.debug("Re-scanned PCI tree");
-                                have_fans = true;
                             }
                             Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
                                 lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
