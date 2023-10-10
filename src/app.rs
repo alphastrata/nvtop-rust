@@ -36,6 +36,8 @@ pub fn run(
         .iter()
         .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
 
+    lh.debug(&format!("GPU has fans = {}", have_fans));
+
     loop {
         _ = terminal.draw(|f| {
             let gpu = &gpu_list[selected_gpu];
@@ -48,7 +50,10 @@ pub fn run(
                     .split(f.size());
 
                 #[cfg(target_os = "linux")]
-                f.render_widget(Paragraph::new("q to quit, p to rescan devices"), layout[1]);
+                f.render_widget(
+                    Paragraph::new("q to quit, p to rescan devices").alignment(Alignment::Right),
+                    layout[1],
+                );
 
                 #[cfg(target_os = "windows")]
                 f.render_widget(Paragraph::new("q to quit"), layout[1]);
@@ -148,7 +153,7 @@ pub fn run(
                 // Fan speed:
                 if have_fans {
                     let gauge = draw_fan_speed(gpu);
-                    f.render_widget(gauge, chunks[2]);                  
+                    f.render_widget(gauge, chunks[2]);
                 }
             }
         })?;
@@ -212,7 +217,8 @@ fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         .sum::<f64>()
         / temps as f64;
 
-    let percentage = (avg / 100.).clamp(0., 1.0);
+    let percentage = (avg / 100.).clamp(0.0, 1.0);
+
     let label = format!("{:.1}%", avg);
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
 
