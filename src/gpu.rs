@@ -4,14 +4,13 @@ use std::{
     ops::Deref,
 };
 
-use log::{error, trace};
 use nvml_wrapper::{
     enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
     error::NvmlError,
     Device, Nvml,
 };
 
-use crate::errors::NvTopError;
+use crate::{errors::NvTopError, termite::LoggingHandle};
 
 #[derive(Debug)]
 pub struct GpuInfo<'d> {
@@ -39,14 +38,6 @@ impl<'d> GpuInfo<'d> {
             driver_version,
             cuda_version / 1000.0
         );
-        trace!("Setting misc = {misc}");
-
-        // dbg!(
-        //     dev.max_clock_info(Clock::Graphics)?,
-        //     dev.max_clock_info(Clock::Video)?,
-        //     dev.max_clock_info(Clock::SM)?,
-        //     dev.max_clock_info(Clock::Memory)?,
-        // );
 
         Ok(GpuInfo {
             max_memory_clock: device.max_clock_info(Clock::Memory)?,
@@ -102,11 +93,10 @@ impl fmt::Display for GpuInfo<'_> {
                                 .unwrap_or_default()
                         }
                         Err(err) => {
-                            let formatted = format!(
+                            let _formatted = format!(
                                 "clock_type={:?}\t\tclock_id={:?} {}",
                                 clock_type, clock_id, err,
                             );
-                            log::error!("{formatted}")
                         }
                     }
                 });
@@ -115,7 +105,10 @@ impl fmt::Display for GpuInfo<'_> {
     }
 }
 
-pub fn list_available_gpus(nvml: &Nvml) -> Result<Vec<GpuInfo<'_>>, NvTopError> {
+pub fn try_init_gpus<'n>(
+    nvml: &'n Nvml,
+    lh: &LoggingHandle,
+) -> Result<Vec<GpuInfo<'n>>, NvTopError> {
     let count = nvml.device_count()?;
     let mut gpu_list = Vec::with_capacity(count as usize);
 
@@ -123,16 +116,16 @@ pub fn list_available_gpus(nvml: &Nvml) -> Result<Vec<GpuInfo<'_>>, NvTopError> 
         match nvml.device_by_index(i) {
             Ok(dev) => {
                 let gpu = GpuInfo::from_device(i, dev)?;
-                trace!("Compatible GPU found at [{i}]: {gpu}");
+                lh.error(&format!("Compatible GPU found at [{i}]: {gpu}"));
                 gpu_list.push(gpu);
             }
             Err(
-                err @ (NvmlError::InsufficientPower
+                _err @ (NvmlError::InsufficientPower
                 | NvmlError::NoPermission
                 | NvmlError::IrqIssue
                 | NvmlError::GpuLost),
             ) => {
-                error!("Failed to init device [{i}]: {err}");
+                lh.error("Failed to init device [{i}]: {err}");
                 continue; // carry on
             }
             Err(e) => return Err(e.into()),

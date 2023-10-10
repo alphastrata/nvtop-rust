@@ -1,4 +1,3 @@
-use log::{debug, trace};
 use nvml_wrapper::enum_wrappers::device::{Clock, ClockId};
 use nvml_wrapper::error::NvmlError;
 use nvml_wrapper::struct_wrappers::device::PciInfo;
@@ -15,19 +14,29 @@ use std::time::Duration;
 
 use crate::errors::NvTopError;
 use crate::stylers::calculate_severity;
+use crate::termite::LoggingHandle;
 use crate::{errors, gpu::GpuInfo};
 pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 
-pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), errors::NvTopError> {
+pub fn run(
+    nvml: nvml_wrapper::Nvml,
+    delay: Duration,
+    lh: &LoggingHandle,
+) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stderr()))?;
-    trace!("crossterm initialisation successful");
+    lh.debug("crossterm initialisation successful");
 
-    let mut gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+    let mut gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
 
     let mut selected_gpu: usize = 0;
+    let mut have_fans: bool = gpu_list
+        .iter()
+        .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
+
+    lh.debug(&format!("GPU has fans = {}", have_fans));
 
     loop {
         _ = terminal.draw(|f| {
@@ -40,7 +49,14 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                     .constraints([Constraint::Min(0), Constraint::Length(1)])
                     .split(f.size());
 
-                f.render_widget(Paragraph::new("q to quit, p to rescan devices"), layout[1]);
+                #[cfg(target_os = "linux")]
+                f.render_widget(
+                    Paragraph::new("q to quit, p to rescan devices").alignment(Alignment::Right),
+                    layout[1],
+                );
+
+                #[cfg(target_os = "windows")]
+                f.render_widget(Paragraph::new("q to quit"), layout[1]);
 
                 layout[0]
             } else {
@@ -134,9 +150,11 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                 let temp_gauge = draw_gpu_die_temp(gpu);
                 f.render_widget(temp_gauge, chunks[1]);
 
-                // Fanspeed:
-                let fan_gauge = draw_fan_speed(gpu);
-                f.render_widget(fan_gauge, chunks[2]);
+                // Fan speed:
+                if have_fans {
+                    let gauge = draw_fan_speed(gpu);
+                    f.render_widget(gauge, chunks[2]);
+                }
             }
         })?;
 
@@ -149,6 +167,8 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                     KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => {
                         selected_gpu = usize::from(n - 1)
                     }
+
+                    #[cfg(target_os = "linux")]
                     KeyCode::Char('p') => {
                         // re-scan pci tree to let driver discover new devices (only works as sudo)
                         match nvml.discover_gpus(PciInfo {
@@ -159,15 +179,21 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
                             pci_device_id: 0,
                             pci_sub_system_id: Some(0),
                         }) {
-                            Ok(()) => debug!("Re-scanned PCI tree"),
+                            Ok(()) => {
+                                have_fans = gpu_list
+                                    .iter()
+                                    .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
+
+                                lh.debug(&format!("GPU has fans = {}", have_fans));
+                                lh.debug("Re-scanned PCI tree");
+                            }
                             Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
-                                debug!("Failed to re-scan PCI tree: {e}");
+                                lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
                             }
                             Err(e) => return Err(e.into()),
                         }
-
                         // re-scan for devices
-                        gpu_list = crate::gpu::list_available_gpus(&nvml)?;
+                        gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
                         if selected_gpu >= gpu_list.len() {
                             selected_gpu = 0;
                         }
@@ -188,14 +214,18 @@ pub fn run(nvml: nvml_wrapper::Nvml, delay: Duration) -> anyhow::Result<(), erro
 }
 
 fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
-    let temps = gpu.inner.num_fans().map_or(0, |fc| fc);
+    let temps = gpu
+        .inner
+        .num_fans()
+        .expect("This should be impossible as we never call this without having earlier checked.");
     let avg = (0..temps as usize)
         .flat_map(|v| gpu.inner.fan_speed(v as u32))
         .map(|u| u as f64)
         .sum::<f64>()
         / temps as f64;
 
-    let percentage = (avg / 100.).clamp(0., 1.0);
+    let percentage = (avg / 100.).clamp(0.0, 1.0);
+
     let label = format!("{:.1}%", avg);
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
 
@@ -215,7 +245,7 @@ fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
 
     let label = format!("{:.2}°C", gpu_die_temperature);
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
-    let temp_ratio = (gpu_die_temperature as f64 / 100.).clamp(0., 1.0);
+    let temp_ratio = (gpu_die_temperature as f64 / 100.).clamp(0.0, 1.0);
 
     Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Temp"))
