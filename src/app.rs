@@ -210,7 +210,10 @@ pub fn run(
 }
 
 fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
-    let temps = gpu.inner.num_fans().map_or(0, |fc| fc);
+    let temps = gpu
+        .inner
+        .num_fans()
+        .expect("This should be impossible as we never call this without having earlier checked.");
     let avg = (0..temps as usize)
         .flat_map(|v| gpu.inner.fan_speed(v as u32))
         .map(|u| u as f64)
