@@ -32,6 +32,9 @@ pub fn run(
     let mut gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
 
     let mut selected_gpu: usize = 0;
+    let mut have_fans: bool = gpu_list
+        .iter()
+        .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
 
     loop {
         _ = terminal.draw(|f| {
@@ -44,7 +47,11 @@ pub fn run(
                     .constraints([Constraint::Min(0), Constraint::Length(1)])
                     .split(f.size());
 
+                #[cfg(target_os = "linux")]
                 f.render_widget(Paragraph::new("q to quit, p to rescan devices"), layout[1]);
+
+                #[cfg(target_os = "windows")]
+                f.render_widget(Paragraph::new("q to quit"), layout[1]);
 
                 layout[0]
             } else {
@@ -138,9 +145,11 @@ pub fn run(
                 let temp_gauge = draw_gpu_die_temp(gpu);
                 f.render_widget(temp_gauge, chunks[1]);
 
-                // Fanspeed:
-                let fan_gauge = draw_fan_speed(gpu);
-                f.render_widget(fan_gauge, chunks[2]);
+                // Fan speed:
+                if have_fans {
+                    let gauge = draw_fan_speed(gpu);
+                    f.render_widget(gauge, chunks[2]);                  
+                }
             }
         })?;
 
@@ -153,6 +162,8 @@ pub fn run(
                     KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => {
                         selected_gpu = usize::from(n - 1)
                     }
+
+                    #[cfg(target_os = "linux")]
                     KeyCode::Char('p') => {
                         // re-scan pci tree to let driver discover new devices (only works as sudo)
                         match nvml.discover_gpus(PciInfo {
@@ -163,13 +174,15 @@ pub fn run(
                             pci_device_id: 0,
                             pci_sub_system_id: Some(0),
                         }) {
-                            Ok(()) => lh.debug("Re-scanned PCI tree"),
+                            Ok(()) => {
+                                lh.debug("Re-scanned PCI tree");
+                                have_fans = true;
+                            }
                             Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
                                 lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
                             }
                             Err(e) => return Err(e.into()),
                         }
-
                         // re-scan for devices
                         gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
                         if selected_gpu >= gpu_list.len() {
@@ -219,7 +232,7 @@ fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
 
     let label = format!("{:.2}°C", gpu_die_temperature);
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
-    let temp_ratio = (gpu_die_temperature as f64 / 100.).clamp(0., 1.0);
+    let temp_ratio = (gpu_die_temperature as f64 / 100.).clamp(0.0, 1.0);
 
     Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Temp"))
