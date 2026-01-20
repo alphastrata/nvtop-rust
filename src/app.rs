@@ -131,7 +131,7 @@ pub fn run(
                 layout[1]
             };
 
-            // Outermost Block, which draws the green border aound the whole UI.
+            // Outermost Block, which draws the green border around the whole UI.
             let block = Block::default()
                 .title("NVTOP")
                 .title_top(Line::from("NVTOP"))
@@ -169,12 +169,12 @@ pub fn run(
 
             let left_middle = Layout::default()
                 .constraints([
-                    Constraint::Percentage(50), // Core utilization
+                    Constraint::Percentage(50), // Core utilisation
                     Constraint::Percentage(50), // Core Clock
                 ])
                 .split(middle_chunks[0]);
 
-            // Core utilization
+            // Core utilisation
             let core_gauge = draw_core_utilisation(gpu);
             f.render_widget(core_gauge, left_middle[0]);
 
@@ -209,7 +209,7 @@ pub fn run(
             let process_widget = draw_misc_with_processes(gpu, &fuzzy_search_input, &sort_by, sort_reverse, process_selection_enabled, highlighted_process_index, selected_process_pid);
             f.render_widget(process_widget, main_layout[2]);
 
-            // If fuzzy search is active, render a modal-style search box in the center as an overlay
+            // If fuzzy search is active, render a modal-style search box in the Center as an overlay
             if fuzzy_search_active {
                 let search_text = format!("{}_", &fuzzy_search_input);
                 let block = Block::default()
@@ -222,7 +222,7 @@ pub fn run(
                     .style(Style::default().bg(Color::Rgb(40, 40, 40)).fg(Color::LightCyan).add_modifier(Modifier::BOLD))
                     .alignment(Alignment::Left);
 
-                // Calculate centered position for the search box
+                // Calculate Centerd position for the search box
                 let search_width = 60.min(f.area().width.saturating_sub(2));
                 let search_height = 3;
                 let x = f.area().width / 2 - search_width / 2;
