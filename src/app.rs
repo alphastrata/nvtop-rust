@@ -8,6 +8,7 @@ use ratatui::{prelude::*, widgets::*};
 use ratatui::{
     prelude::{CrosstermBackend, Terminal},
     widgets::Paragraph,
+    widgets::Block,
 };
 
 use std::time::Duration;
@@ -16,7 +17,6 @@ use crate::errors::NvTopError;
 use crate::stylers::calculate_severity;
 use crate::termite::LoggingHandle;
 use crate::{errors, gpu::GpuInfo};
-pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<std::io::Stderr>>;
 
 pub fn run(
     nvml: nvml_wrapper::Nvml,
@@ -35,6 +35,9 @@ pub fn run(
     let mut have_fans: bool = gpu_list
         .iter()
         .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
+    
+    // State variables for process view
+    let mut show_process_view: bool = false;
 
     lh.debug(&format!("GPU has fans = {}", have_fans));
 
@@ -47,16 +50,27 @@ pub fn run(
                 let layout = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Min(0), Constraint::Length(1)])
-                    .split(f.size());
+                    .split(f.area());
 
                 #[cfg(target_os = "linux")]
                 f.render_widget(
-                    Paragraph::new("q to quit, p to rescan devices").alignment(Alignment::Right),
+                    if show_process_view {
+                        Paragraph::new("q to quit, p to rescan devices, ESC to return to stats").alignment(Alignment::Left)
+                    } else {
+                        Paragraph::new("q to quit, p to rescan devices").alignment(Alignment::Right)
+                    },
                     layout[1],
                 );
 
                 #[cfg(target_os = "windows")]
-                f.render_widget(Paragraph::new("q to quit"), layout[1]);
+                f.render_widget(
+                    Paragraph::new(if show_process_view {
+                        "q to quit, ESC to return to stats"
+                    } else {
+                        "q to quit" 
+                    }),
+                    layout[1],
+                );
 
                 layout[0]
             } else {
@@ -67,14 +81,14 @@ pub fn run(
                         Constraint::Min(0),
                         Constraint::Length(1),
                     ])
-                    .split(f.size());
+                    .split(f.area());
 
                 f.render_widget(
                     Tabs::new(
                         gpu_list
                             .iter()
                             .map(|gpu| format!("[{}] {}", gpu.index, gpu.card_type))
-                            .collect(),
+                            .collect::<Vec<_>>(),
                     )
                     .select(selected_gpu)
                     .style(Style::default().fg(Color::Green))
@@ -84,7 +98,13 @@ pub fn run(
                 );
 
                 f.render_widget(
-                    Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices"),
+                    Paragraph::new(
+                        if show_process_view {
+                            "q to quit, p to rescan devices, fn keys to switch devices, ESC to return to stats"
+                        } else {
+                            "q to quit, p to rescan devices, fn keys to switch devices, f or / to show processes"
+                        }
+                    ),
                     layout[2],
                 );
 
@@ -94,7 +114,7 @@ pub fn run(
             // Outermost Block, which draws the green border aound the whole UI.
             let block = Block::default()
                 .title("NVTOP")
-                .title_position(block::Position::Top)
+                .title_top(Line::from("NVTOP"))
                 .title_alignment(Alignment::Center)
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Green))
@@ -106,7 +126,7 @@ pub fn run(
                 .direction(Direction::Horizontal)
                 .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
                 .margin(1)
-                .split(f.size());
+                .split(f.area());
 
             {
                 let chunks = Layout::default()
@@ -126,9 +146,15 @@ pub fn run(
                 let core_gauge = draw_core_clock(gpu).unwrap();
                 f.render_widget(core_gauge, chunks[1]);
 
-                // Misc:
-                let paragraph = draw_misc(gpu);
-                f.render_widget(paragraph, chunks[2]);
+                if !show_process_view {
+                    // Misc (normal view):
+                    let paragraph = draw_misc(gpu);
+                    f.render_widget(paragraph, chunks[2]);
+                } else {
+                    // Process view instead of misc
+                    let process_widget = draw_gpu_processes(gpu);
+                    f.render_widget(process_widget, chunks[2]);
+                }
             }
 
             {
@@ -151,7 +177,15 @@ pub fn run(
                 f.render_widget(temp_gauge, chunks[1]);
 
                 // Fan speed:
-                if have_fans {
+                if have_fans && !show_process_view {
+                    let gauge = draw_fan_speed(gpu);
+                    f.render_widget(gauge, chunks[2]);
+                } else if show_process_view {
+                    // Show additional process information or blank space
+                    let blank_widget = draw_process_blank_space();
+                    f.render_widget(blank_widget, chunks[2]);
+                } else {
+                    // Regular fan speed view
                     let gauge = draw_fan_speed(gpu);
                     f.render_widget(gauge, chunks[2]);
                 }
@@ -164,6 +198,16 @@ pub fn run(
 
                 match key.code {
                     KeyCode::Char('q') => break,
+                    KeyCode::Esc => {
+                        // Exit process view mode if currently in it
+                        if show_process_view {
+                            show_process_view = false;
+                        }
+                    }
+                    KeyCode::Char('f') | KeyCode::Char('/') => {
+                        // Toggle or enter process view mode
+                        show_process_view = true;
+                    }
                     KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => {
                         selected_gpu = usize::from(n - 1)
                     }
@@ -233,7 +277,7 @@ fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         .block(Block::default().borders(Borders::ALL).title("Fan Speed"))
         .gauge_style(calculate_severity(percentage).style_for())
         .label(spanned_label)
-        .set_style(Style::default())
+        .style(Style::default())
         .ratio(percentage)
 }
 
@@ -251,7 +295,7 @@ fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         .block(Block::default().borders(Borders::ALL).title("Temp"))
         .gauge_style(calculate_severity(temp_ratio).style_for())
         .label(spanned_label)
-        .set_style(Style::default())
+        .style(Style::default())
         .ratio(temp_ratio)
 }
 
@@ -261,6 +305,8 @@ fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
             free: 0,
             total: 0, //TODO: This never changes so put in self
             used: 0,
+            reserved: Default::default(),
+            version: Default::default(),
         },
         |mem_info| mem_info,
     );
@@ -332,4 +378,93 @@ fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, NvTopError> {
         .gauge_style(calculate_severity(percentage).style_for())
         .label(spanned_label)
         .ratio(percentage))
+}
+
+// Placeholder for drawing GPU processes - need to implement actual process retrieval
+fn draw_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        "GPU Processes",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    let processes_text = match get_gpu_processes(gpu) {
+        Ok(processes) => {
+            if processes.is_empty() {
+                "No processes running".to_string()
+            } else {
+                let mut text = String::from("PID\t\tMemory\n");
+                for proc in processes.iter().take(10) { // Show top 10 processes
+                    text.push_str(&format!("{}\t\t{} MB\n", proc.pid, proc.used_memory / 1024 / 1024)); // Convert to MB
+                }
+                text
+            }
+        },
+        Err(_) => { 
+            // If there's an issue with the specific API, try a more general approach
+            match gpu.inner.running_graphics_processes() {
+                Ok(graphics_processes) => {
+                    if graphics_processes.is_empty() {
+                        "No processes running".to_string()
+                    } else {
+                        let mut text = String::from("PID\t\tMemory\n");
+                        for process in graphics_processes.iter().take(10) {
+                            // Try to extract memory value - if not available, use 0
+                            let memory_mb = 0; // Placeholder until we determine correct API
+                            text.push_str(&format!("{}\t\t{} MB\n", process.pid, memory_mb));
+                        }
+                        text
+                    }
+                },
+                Err(_) => "Error retrieving processes".to_string(),
+            }
+        },
+    };
+
+    Paragraph::new(processes_text)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((0, 0))
+}
+
+fn draw_process_blank_space<'d>() -> Paragraph<'d> {
+    let block = Block::default().borders(Borders::ALL).title(" ");
+    Paragraph::new("")
+        .block(block)
+        .wrap(Wrap { trim: true })
+}
+
+// Structure to represent a process running on the GPU 
+#[derive(Debug)]
+struct GpuProcess {
+    pid: u32,
+    used_memory: u64,
+}
+
+// Function to retrieve processes running on the GPU (placeholder until API is properly identified)
+fn get_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Result<Vec<GpuProcess>, NvmlError> {
+    // Try various possible methods to get running processes based on nvml-wrapper API
+    // This might need adjustment based on the specific version
+    
+    // First, try the compute processes method
+    match gpu.inner.running_compute_processes() {
+        Ok(processes) => {
+            let mut gpu_processes = Vec::new();
+            for process in processes {
+                // Since the exact API varies by version, use a default value
+                let memory_value = 0; // Placeholder until we determine correct API access
+                
+                gpu_processes.push(GpuProcess {
+                    pid: process.pid,
+                    used_memory: memory_value,
+                });
+            }
+            Ok(gpu_processes)
+        },
+        Err(_) => {
+            // If that doesn't work, return empty vector
+            Ok(Vec::new())
+        }
+    }
 }

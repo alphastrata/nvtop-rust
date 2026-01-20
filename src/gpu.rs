@@ -87,7 +87,7 @@ impl fmt::Display for GpuInfo<'_> {
             [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
                 .into_iter()
                 .for_each(|clock_type| {
-                    match self.inner.clock(clock_type.clone(), clock_id.clone()) {
+                    match self.inner.clock(clock_type, clock_id) {
                         Ok(value) => {
                             writeln!(f, "Clock {:?} for {:?}: {}", clock_type, clock_id, value)
                                 .unwrap_or_default()
