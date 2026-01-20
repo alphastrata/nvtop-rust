@@ -268,24 +268,6 @@ pub fn run(
                     fuzzy_search_active = true;
                     fuzzy_search_input.clear();
                 }
-                // Handle F keys for fuzzy search
-                KeyCode::F(1)
-                | KeyCode::F(2)
-                | KeyCode::F(3)
-                | KeyCode::F(4)
-                | KeyCode::F(5)
-                | KeyCode::F(6)
-                | KeyCode::F(7)
-                | KeyCode::F(8)
-                | KeyCode::F(9)
-                | KeyCode::F(10)
-                | KeyCode::F(11)
-                | KeyCode::F(12) => {
-                    if !fuzzy_search_active {
-                        fuzzy_search_active = true;
-                        fuzzy_search_input.clear();
-                    }
-                }
                 // Handle character input for fuzzy search - but exclude 'f' and '/' which are handled separately
                 KeyCode::Char(c) if fuzzy_search_active => {
                     fuzzy_search_input.push(c);
@@ -341,14 +323,9 @@ pub fn run(
                         highlighted_process_index += 1;
                     }
                 }
-                KeyCode::F(n)
-                    if (1..=gpu_list.len()).contains(&n.into()) && !fuzzy_search_active =>
-                {
-                    selected_gpu = usize::from(n - 1)
-                }
-
+               
                 #[cfg(target_os = "linux")]
-                KeyCode::Char('p') => {
+                KeyCode::Char('m') => {
                     // re-scan pci tree to let driver discover new devices (only works as sudo)
                     match nvml.discover_gpus(PciInfo {
                         bus: 0,

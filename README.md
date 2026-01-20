@@ -46,6 +46,19 @@ nvtop
 nvtop --log <PATH TO CREATE A LOGFILE @>
 ```
 
+<details>
+### Keyboard Shortcuts:
+
+| Shortcut | Functionality |
+|----------|---------------|
+| `f` or `/` | Search processes (fuzzy) |
+| `s` | 'Sort' [Name || Pid || Memory Usage] |
+| `p` | Processes (up / down arrows) |
+| `r` | Reverse (processes list ordering) |
+| `m` | Multi-Gpu Rescan PCIe devices (Linux Only, multi-gpu systems only.) |
+| `q` | Quit |
+
+</details>
 ______________________________________________________________________
 
 ### Prerequisites
