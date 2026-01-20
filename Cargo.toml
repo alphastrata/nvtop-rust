@@ -1,7 +1,7 @@
 [package]
 name = "nvtop"
-version = "0.1.2"
-edition = "2021"
+version = "0.1.3"
+edition = "2024"
 description = """ nvtop: An NVIDIA SMI'esk GPU Monitoring tool for your terminal. """
 keywords = [
   "Real-time monitoring",
@@ -12,7 +12,7 @@ keywords = [
   "Command-line tool",
 ]
 authors = ["jer, alphastrata@gmail.com", "camuward, cameronuward@gmail.com"]
-documentation = "https://www.github.com/alphastrata/nvtop"
+documentation = "https://www.github.com/alphastrata/nvtop-rust"
 license = "MIT"
 homepage = "https://www.jeremyfwebb.ninja"
 publish = true
