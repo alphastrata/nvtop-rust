@@ -86,18 +86,16 @@ impl fmt::Display for GpuInfo<'_> {
         .for_each(|clock_id| {
             [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
                 .into_iter()
-                .for_each(|clock_type| {
-                    match self.inner.clock(clock_type, clock_id) {
-                        Ok(value) => {
-                            writeln!(f, "Clock {:?} for {:?}: {}", clock_type, clock_id, value)
-                                .unwrap_or_default()
-                        }
-                        Err(err) => {
-                            let _formatted = format!(
-                                "clock_type={:?}\t\tclock_id={:?} {}",
-                                clock_type, clock_id, err,
-                            );
-                        }
+                .for_each(|clock_type| match self.inner.clock(clock_type, clock_id) {
+                    Ok(value) => {
+                        writeln!(f, "Clock {:?} for {:?}: {}", clock_type, clock_id, value)
+                            .unwrap_or_default()
+                    }
+                    Err(err) => {
+                        let _formatted = format!(
+                            "clock_type={:?}\t\tclock_id={:?} {}",
+                            clock_type, clock_id, err,
+                        );
                     }
                 });
         });

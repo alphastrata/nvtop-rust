@@ -23,4 +23,5 @@ clap = { version = "4.5.54", features = ["derive"] }
 crossterm = "0.29.0"
 nvml-wrapper = "0.11.0"
 ratatui = "0.30.0"
+skim = "0.10.4"
 thiserror = "2.0.18"

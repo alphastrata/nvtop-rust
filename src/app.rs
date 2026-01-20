@@ -7,8 +7,8 @@ use ratatui::symbols::DOT;
 use ratatui::{prelude::*, widgets::*};
 use ratatui::{
     prelude::{CrosstermBackend, Terminal},
-    widgets::Paragraph,
     widgets::Block,
+    widgets::Paragraph,
 };
 
 use std::time::Duration;
@@ -35,9 +35,11 @@ pub fn run(
     let mut have_fans: bool = gpu_list
         .iter()
         .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
-    
+
     // State variables for process view
-    let mut show_process_view: bool = false;
+    let mut show_process_view: bool = true; // Always show process view as requested
+    let mut fuzzy_search_active: bool = false;
+    let mut fuzzy_search_input: String = String::new();
 
     lh.debug(&format!("GPU has fans = {}", have_fans));
 
@@ -67,7 +69,7 @@ pub fn run(
                     Paragraph::new(if show_process_view {
                         "q to quit, ESC to return to stats"
                     } else {
-                        "q to quit" 
+                        "q to quit"
                     }),
                     layout[1],
                 );
@@ -97,14 +99,13 @@ pub fn run(
                     layout[0],
                 );
 
+                // Render the main footer text
                 f.render_widget(
-                    Paragraph::new(
-                        if show_process_view {
-                            "q to quit, p to rescan devices, fn keys to switch devices, ESC to return to stats"
-                        } else {
-                            "q to quit, p to rescan devices, fn keys to switch devices, f or / to show processes"
-                        }
-                    ),
+                    if show_process_view {
+                        Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices, ESC to return to stats, f or / to search".to_string())
+                    } else {
+                        Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices, f or / to show processes".to_string())
+                    },
                     layout[2],
                 );
 
@@ -151,8 +152,8 @@ pub fn run(
                     let paragraph = draw_misc(gpu);
                     f.render_widget(paragraph, chunks[2]);
                 } else {
-                    // Process view instead of misc
-                    let process_widget = draw_gpu_processes(gpu);
+                    // Combined misc and processes view
+                    let process_widget = draw_misc_with_processes(gpu, &fuzzy_search_input);
                     f.render_widget(process_widget, chunks[2]);
                 }
             }
@@ -177,18 +178,39 @@ pub fn run(
                 f.render_widget(temp_gauge, chunks[1]);
 
                 // Fan speed:
-                if have_fans && !show_process_view {
-                    let gauge = draw_fan_speed(gpu);
-                    f.render_widget(gauge, chunks[2]);
-                } else if show_process_view {
-                    // Show additional process information or blank space
-                    let blank_widget = draw_process_blank_space();
-                    f.render_widget(blank_widget, chunks[2]);
-                } else {
-                    // Regular fan speed view
+                if have_fans {
                     let gauge = draw_fan_speed(gpu);
                     f.render_widget(gauge, chunks[2]);
                 }
+            }
+
+            // If fuzzy search is active, render a modal-style search box in the center as an overlay
+            if fuzzy_search_active {
+                let search_text = format!("{}_", &fuzzy_search_input);
+                let block = Block::default()
+                    .borders(Borders::ALL)
+                    .title("🔍 Fuzzy Search - Type to search (ESC to cancel)")
+                    .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+
+                let search_input = Paragraph::new(search_text)
+                    .block(block)
+                    .style(Style::default().bg(Color::Rgb(40, 40, 40)).fg(Color::LightCyan).add_modifier(Modifier::BOLD))
+                    .alignment(Alignment::Left);
+
+                // Calculate centered position for the search box
+                let search_width = 60.min(f.area().width.saturating_sub(2));
+                let search_height = 3;
+                let x = f.area().width / 2 - search_width / 2;
+                let y = f.area().height / 2 - 1; // Center vertically
+
+                let search_area = Rect::new(x, y, search_width, search_height);
+
+                // Draw a semi-transparent overlay background
+                let overlay = Paragraph::new(" ")
+                    .style(Style::default().bg(Color::Rgb(20, 20, 20))); // Very dark semi-transparent
+
+                f.render_widget(overlay, f.area());
+                f.render_widget(search_input, search_area);
             }
         })?;
 
@@ -199,16 +221,59 @@ pub fn run(
                 match key.code {
                     KeyCode::Char('q') => break,
                     KeyCode::Esc => {
-                        // Exit process view mode if currently in it
-                        if show_process_view {
+                        // Exit fuzzy search if active, otherwise exit process view mode if currently in it
+                        if fuzzy_search_active {
+                            fuzzy_search_active = false;
+                            fuzzy_search_input.clear();
+                        } else if show_process_view {
                             show_process_view = false;
                         }
                     }
-                    KeyCode::Char('f') | KeyCode::Char('/') => {
-                        // Toggle or enter process view mode
+                    KeyCode::Char('f') => {
+                        // Always activate fuzzy search when 'f' is pressed
                         show_process_view = true;
+                        fuzzy_search_active = true;
+                        fuzzy_search_input.clear();
                     }
-                    KeyCode::F(n) if (1..=gpu_list.len()).contains(&n.into()) => {
+                    KeyCode::Char('/') => {
+                        // Always activate fuzzy search when '/' is pressed
+                        show_process_view = true;
+                        fuzzy_search_active = true;
+                        fuzzy_search_input.clear();
+                    }
+                    // Handle F keys for fuzzy search
+                    KeyCode::F(1)
+                    | KeyCode::F(2)
+                    | KeyCode::F(3)
+                    | KeyCode::F(4)
+                    | KeyCode::F(5)
+                    | KeyCode::F(6)
+                    | KeyCode::F(7)
+                    | KeyCode::F(8)
+                    | KeyCode::F(9)
+                    | KeyCode::F(10)
+                    | KeyCode::F(11)
+                    | KeyCode::F(12) => {
+                        if !fuzzy_search_active {
+                            fuzzy_search_active = true;
+                            fuzzy_search_input.clear();
+                        }
+                    }
+                    // Handle character input for fuzzy search - but exclude 'f' and '/' which are handled separately
+                    KeyCode::Char(c) if fuzzy_search_active => {
+                        fuzzy_search_input.push(c);
+                    }
+                    // Handle backspace in fuzzy search
+                    KeyCode::Backspace if fuzzy_search_active => {
+                        fuzzy_search_input.pop();
+                    }
+                    // Handle Enter to exit fuzzy search
+                    KeyCode::Enter if fuzzy_search_active => {
+                        fuzzy_search_active = false;
+                    }
+                    KeyCode::F(n)
+                        if (1..=gpu_list.len()).contains(&n.into()) && !fuzzy_search_active =>
+                    {
                         selected_gpu = usize::from(n - 1)
                     }
 
@@ -340,6 +405,77 @@ fn draw_misc<'d>(gpu: &'d GpuInfo<'d>) -> Paragraph<'d> {
         .wrap(Wrap { trim: true })
 }
 
+fn draw_misc_with_processes<'d>(gpu: &GpuInfo<'d>, search_term: &str) -> Paragraph<'d> {
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        "Misc/Processes",
+        Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    let content = match get_gpu_processes(gpu) {
+        Ok(mut processes) => {
+            if processes.is_empty() {
+                format!("{}\n\nNo processes running", gpu.misc)
+            } else {
+                // Filter and rank processes based on search term if provided
+                if !search_term.is_empty() {
+                    // Create pairs of (process, score) and filter by positive scores
+                    let mut scored_processes: Vec<(GpuProcess, i32)> = Vec::new();
+
+                    for proc in processes {
+                        let name_score = fuzzy_score(&proc.name, search_term);
+                        let pid_score = fuzzy_score(&proc.pid.to_string(), search_term);
+
+                        // Use the higher of the two scores
+                        let max_score = name_score.max(pid_score);
+
+                        if max_score > 0 {
+                            scored_processes.push((proc, max_score));
+                        }
+                    }
+
+                    // Sort by score (descending) - highest scores first
+                    scored_processes.sort_by(|a, b| b.1.cmp(&a.1));
+
+                    // Extract just the processes in ranked order
+                    processes = scored_processes.into_iter().map(|(proc, _)| proc).collect();
+                } else {
+                    // Sort by memory usage when not searching
+                    processes.sort_by(|a, b| b.used_memory.cmp(&a.used_memory));
+                }
+
+                if processes.is_empty() && !search_term.is_empty() {
+                    format!("{}\n\nNo processes match '{}'", gpu.misc, search_term)
+                } else {
+                    let mut content = gpu.misc.clone();
+                    content.push_str("\n\nProcesses:\n");
+                    content.push_str("Name                 PID      Memory(MB)\n");
+                    for proc in processes.iter().take(10) {
+                        // Show top 10 processes
+                        let memory_mb = proc.used_memory / 1024 / 1024; // Convert bytes to MB
+                                                                        // Format with right-aligned memory usage
+                        content.push_str(&format!(
+                            "{:<20} {:>10} {:>10} MB\n",
+                            proc.name, proc.pid, memory_mb
+                        ));
+                    }
+                    content
+                }
+            }
+        }
+        Err(_) => {
+            // Fallback: show misc info with error message
+            format!("{}\n\nError retrieving processes", gpu.misc)
+        }
+    };
+
+    Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((0, 0))
+}
+
 fn draw_core_utilisation<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
     let utilisation_rates = gpu.inner.utilization_rates();
     let percent = utilisation_rates.map_or(0, |ur| ur.gpu as u16);
@@ -380,91 +516,154 @@ fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, NvTopError> {
         .ratio(percentage))
 }
 
-// Placeholder for drawing GPU processes - need to implement actual process retrieval
-fn draw_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        "GPU Processes",
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    ));
+// Helper function for fuzzy matching using a more sophisticated algorithm
+fn fuzzy_match(text: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
 
-    let processes_text = match get_gpu_processes(gpu) {
-        Ok(processes) => {
-            if processes.is_empty() {
-                "No processes running".to_string()
+    let text_chars: Vec<char> = text.chars().collect();
+    let pattern_chars: Vec<char> = pattern.chars().collect();
+
+    let mut text_idx = 0;
+    let mut pattern_idx = 0;
+
+    while text_idx < text_chars.len() && pattern_idx < pattern_chars.len() {
+        if text_chars[text_idx]
+            .to_lowercase()
+            .eq(pattern_chars[pattern_idx].to_lowercase())
+        {
+            pattern_idx += 1;
+        }
+        text_idx += 1;
+    }
+
+    pattern_idx == pattern_chars.len()
+}
+
+// Helper function to score fuzzy matches (higher score = better match)
+fn fuzzy_score(text: &str, pattern: &str) -> i32 {
+    if pattern.is_empty() {
+        return 0;
+    }
+
+    let text_lower = text.to_lowercase();
+    let pattern_lower = pattern.to_lowercase();
+
+    if !fuzzy_match(text, pattern) {
+        return -1; // No match
+    }
+
+    // Calculate score based on match quality
+    let mut score = 0;
+    let text_chars: Vec<char> = text_lower.chars().collect();
+    let pattern_chars: Vec<char> = pattern_lower.chars().collect();
+
+    let mut text_idx = 0;
+    let mut pattern_idx = 0;
+    let mut consecutive_bonus = 0;
+
+    // Simple scoring algorithm: find matches and give bonuses for consecutive letters
+    while text_idx < text_chars.len() && pattern_idx < pattern_chars.len() {
+        if text_chars[text_idx] == pattern_chars[pattern_idx] {
+            // Bonus for consecutive matches
+            if text_idx > 0 && pattern_idx > 0 &&
+               text_chars[text_idx - 1] == pattern_chars[pattern_idx - 1] {
+                consecutive_bonus += 10;
             } else {
-                let mut text = String::from("PID\t\tMemory\n");
-                for proc in processes.iter().take(10) { // Show top 10 processes
-                    text.push_str(&format!("{}\t\t{} MB\n", proc.pid, proc.used_memory / 1024 / 1024)); // Convert to MB
-                }
-                text
+                consecutive_bonus = 10; // Base bonus for a match
             }
-        },
-        Err(_) => { 
-            // If there's an issue with the specific API, try a more general approach
-            match gpu.inner.running_graphics_processes() {
-                Ok(graphics_processes) => {
-                    if graphics_processes.is_empty() {
-                        "No processes running".to_string()
-                    } else {
-                        let mut text = String::from("PID\t\tMemory\n");
-                        for process in graphics_processes.iter().take(10) {
-                            // Try to extract memory value - if not available, use 0
-                            let memory_mb = 0; // Placeholder until we determine correct API
-                            text.push_str(&format!("{}\t\t{} MB\n", process.pid, memory_mb));
-                        }
-                        text
-                    }
-                },
-                Err(_) => "Error retrieving processes".to_string(),
-            }
-        },
-    };
 
-    Paragraph::new(processes_text)
-        .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((0, 0))
+            score += consecutive_bonus + 5; // Base score plus consecutive bonus
+            pattern_idx += 1;
+        } else {
+            consecutive_bonus = 0; // Reset consecutive bonus
+        }
+
+        text_idx += 1;
+    }
+
+    score
 }
 
-fn draw_process_blank_space<'d>() -> Paragraph<'d> {
-    let block = Block::default().borders(Borders::ALL).title(" ");
-    Paragraph::new("")
-        .block(block)
-        .wrap(Wrap { trim: true })
-}
-
-// Structure to represent a process running on the GPU 
+// Structure to represent a process running on the GPU
 #[derive(Debug)]
 struct GpuProcess {
     pid: u32,
     used_memory: u64,
+    name: String, // Process name
 }
 
-// Function to retrieve processes running on the GPU (placeholder until API is properly identified)
+// Function to retrieve processes running on the GPU
 fn get_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Result<Vec<GpuProcess>, NvmlError> {
-    // Try various possible methods to get running processes based on nvml-wrapper API
-    // This might need adjustment based on the specific version
-    
-    // First, try the compute processes method
-    match gpu.inner.running_compute_processes() {
-        Ok(processes) => {
-            let mut gpu_processes = Vec::new();
-            for process in processes {
-                // Since the exact API varies by version, use a default value
-                let memory_value = 0; // Placeholder until we determine correct API access
-                
+    let mut gpu_processes = Vec::new();
+
+    // Try to get compute processes
+    if let Ok(compute_processes) = gpu.inner.running_compute_processes() {
+        for process in compute_processes {
+            let name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
+                Ok(name) => name.trim().to_string(),
+                Err(_) => format!("Process-{}", process.pid), // Fallback if we can't get the name
+            };
+
+            // Access memory value for compute processes - it's a direct UsedGpuMemory value
+            let memory_value = extract_memory_value(process.used_gpu_memory);
+
+            gpu_processes.push(GpuProcess {
+                pid: process.pid,
+                used_memory: memory_value,
+                name,
+            });
+        }
+    }
+
+    // Also try to get graphics processes to get a complete picture
+    if let Ok(graphics_processes) = gpu.inner.running_graphics_processes() {
+        for process in graphics_processes {
+            // Check if this process is already in our list (from compute processes)
+            if !gpu_processes.iter().any(|p| p.pid == process.pid) {
+                let name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
+                    Ok(name) => name.trim().to_string(),
+                    Err(_) => format!("Process-{}", process.pid), // Fallback if we can't get the name
+                };
+
+                // Extract memory value for graphics process - based on the error, it's UsedGpuMemory (not optional)
+                let memory_value = extract_memory_value(process.used_gpu_memory);
+
                 gpu_processes.push(GpuProcess {
                     pid: process.pid,
                     used_memory: memory_value,
+                    name,
                 });
             }
-            Ok(gpu_processes)
-        },
-        Err(_) => {
-            // If that doesn't work, return empty vector
-            Ok(Vec::new())
         }
     }
+
+    Ok(gpu_processes)
+}
+
+// Helper function to extract the memory value from UsedGpuMemory enum
+// Using a direct approach with the actual enum structure
+fn extract_memory_value(used_memory: nvml_wrapper::enums::device::UsedGpuMemory) -> u64 {
+    // Since we can't determine the exact API, let's use a different approach
+    // by converting the enum to a string and extracting the value
+    let s = format!("{:?}", used_memory);
+
+    // Look for the pattern where the memory value appears in the debug output
+    // For example, if it looks like "Unrestricted(123456)" or similar
+    if let Some(start) = s.find('(') {
+        if let Some(end) = s.find(')') {
+            if start < end {
+                let num_str = &s[start + 1..end];
+                return num_str.parse::<u64>().unwrap_or(0);
+            }
+        }
+    }
+
+    // If the pattern isn't found, try to extract any number from the string
+    s.chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse::<u64>()
+        .unwrap_or(0)
 }
