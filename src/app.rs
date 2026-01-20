@@ -44,12 +44,12 @@ pub fn run(
         .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
 
     // State variables for process view
-    let mut show_process_view: bool = true; // Always show process view as requested
+    let mut show_process_view: bool = true;
     let mut fuzzy_search_active: bool = false;
     let mut fuzzy_search_input: String = String::new();
 
     let mut sort_by: ProcessSortBy = ProcessSortBy::Memory;
-    let mut sort_reverse: bool = true; // Descending by default
+    let mut sort_reverse: bool = true;
 
     // State for process selection
     let mut selected_process_pid: Option<u32> = None;
@@ -142,13 +142,12 @@ pub fn run(
                 .style(Style::default());
             f.render_widget(block, mid_area);
 
-            // Main vertical layout: top for card info, middle for metrics, bottom for processes
             let main_layout = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(3), // Top 3 lines for card info
-                    Constraint::Percentage(50), // Middle 50% for metrics
-                    Constraint::Percentage(45), // Bottom 45% for processes
+                    Constraint::Length(3),
+                    Constraint::Percentage(50),
+                    Constraint::Percentage(45),
                 ])
                 .margin(1)
                 .split(f.area());
@@ -460,22 +459,7 @@ fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         .ratio(mem_percentage)
 }
 
-fn draw_misc<'d>(gpu: &'d GpuInfo<'d>) -> Paragraph<'d> {
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        "Misc",
-        Style::default()
-            .fg(Color::Magenta)
-            .add_modifier(Modifier::BOLD),
-    ));
 
-    let spanned_label = Span::styled(&gpu.misc, Style::new().white().bold());
-
-    Paragraph::new(spanned_label)
-        .block(block)
-        .wrap(Wrap { trim: true })
-}
-
-// Function to draw the driver info panel
 fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         "Card Info",
@@ -490,7 +474,7 @@ fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
     };
 
     let info_text = format!(
-        "Card: {}\nDriver: {}\nCUDA: {:.1}\nCompute Cap: {}",
+        "Card: {:<15} | Driver: {:<12} | CUDA: {:<8} | Compute Cap: {}",
         gpu.card_type,
         gpu.driver_version,
         gpu.cuda_version / 1000.0,
@@ -503,53 +487,7 @@ fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
 }
 
 // Helper function to get process-specific information
-fn get_process_specific_info<'d>(gpu: &GpuInfo<'d>, pid: u32) -> String {
-    match get_gpu_processes(gpu) {
-        Ok(processes) => {
-            if let Some(proc) = processes.iter().find(|p| p.pid == pid) {
-                format!(
-                    "PID: {}\nProcess: {}\nMemory: {} MB",
-                    proc.pid,
-                    proc.name,
-                    proc.used_memory / 1024 / 1024
-                )
-            } else {
-                format!("PID: {}\nProcess: Unknown\nMemory: N/A", pid)
-            }
-        }
-        Err(_) => {
-            format!("PID: {}\nProcess: Error retrieving info", pid)
-        }
-    }
-}
 
-// Function to draw process-specific info
-fn draw_process_info<'d>(_gpu: &GpuInfo<'d>, process_info: &'d str) -> Paragraph<'d> {
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        "Selected Process",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    ));
-
-    Paragraph::new(process_info)
-        .block(block)
-        .wrap(Wrap { trim: true })
-}
-
-// Function to draw process-specific clock info
-fn draw_process_clock_info<'d>(_gpu: &GpuInfo<'d>, process_info: &'d str) -> Paragraph<'d> {
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        "Process Details",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    ));
-
-    Paragraph::new(process_info)
-        .block(block)
-        .wrap(Wrap { trim: true })
-}
 
 fn draw_misc_with_processes<'d>(
     gpu: &GpuInfo<'d>,
@@ -647,8 +585,8 @@ fn draw_misc_with_processes<'d>(
                             "G" // Graphics
                         };
 
-                        // Alternate row colors for better readability
-                        let row_prefix = if idx % 2 == 0 { "  " } else { "  " }; // Using spaces for alternating appearance
+                        // Row prefix for display
+                        let row_prefix = "  "; // Using spaces for appearance
 
                         // Highlight the currently selected/highlighted process
                         let line = if process_selection_enabled && idx == highlighted_process_index
