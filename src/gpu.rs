@@ -5,9 +5,9 @@ use std::{
 };
 
 use nvml_wrapper::{
+    Device, Nvml,
     enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
     error::NvmlError,
-    Device, Nvml,
 };
 
 use crate::{errors::NvTopError, termite::LoggingHandle};
@@ -140,8 +140,8 @@ pub fn try_init_gpus<'n>(
 #[cfg(test)]
 mod tests {
     use nvml_wrapper::{
-        enum_wrappers::device::{Clock, ClockId},
         Nvml,
+        enum_wrappers::device::{Clock, ClockId},
     };
 
     #[ignore = ""]

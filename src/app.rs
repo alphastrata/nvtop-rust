@@ -25,6 +25,13 @@ enum ProcessSortBy {
     Pid,
 }
 
+#[derive(Debug)]
+struct GpuProcess {
+    pid: u32,
+    used_memory: u64,
+    name: String,
+}
+
 pub fn run(
     nvml: nvml_wrapper::Nvml,
     delay: Duration,
@@ -222,162 +229,155 @@ pub fn run(
                     .style(Style::default().bg(Color::Rgb(40, 40, 40)).fg(Color::LightCyan).add_modifier(Modifier::BOLD))
                     .alignment(Alignment::Left);
 
-                // Calculate Centerd position for the search box
+                // Centre the search box
                 let search_width = 60.min(f.area().width.saturating_sub(2));
                 let search_height = 3;
                 let x = f.area().width / 2 - search_width / 2;
-                let y = f.area().height / 2 - 1; // Center vertically
+                let y = f.area().height / 2 - 1; // Vertically..
 
                 let search_area = Rect::new(x, y, search_width, search_height);
 
                 // Draw a semi-transparent overlay background
                 let overlay = Paragraph::new(" ")
-                    .style(Style::default().bg(Color::Rgb(20, 20, 20))); // Very dark semi-transparent
+                    .style(Style::default().bg(Color::Rgb(20, 20, 20))); // Very dark semi-transparent?
 
                 f.render_widget(overlay, f.area());
                 f.render_widget(search_input, search_area);
             }
         })?;
 
-        if crossterm::event::poll(std::time::Duration::from_millis(250))? {
-            if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                use crossterm::event::KeyCode;
+        if crossterm::event::poll(std::time::Duration::from_millis(250))?
+            && let crossterm::event::Event::Key(key) = crossterm::event::read()?
+        {
+            use crossterm::event::KeyCode;
 
-                match key.code {
-                    KeyCode::Char('q') => break,
-                    KeyCode::Esc => {
-                        // Exit fuzzy search if active, otherwise exit process view mode if currently in it
-                        if fuzzy_search_active {
-                            fuzzy_search_active = false;
-                            fuzzy_search_input.clear();
-                        } else if show_process_view {
-                            show_process_view = false;
-                        }
-                    }
-                    KeyCode::Char('f') => {
-                        // Always activate fuzzy search when 'f' is pressed
-                        show_process_view = true;
-                        fuzzy_search_active = true;
-                        fuzzy_search_input.clear();
-                    }
-                    KeyCode::Char('/') => {
-                        // Always activate fuzzy search when '/' is pressed
-                        show_process_view = true;
-                        fuzzy_search_active = true;
-                        fuzzy_search_input.clear();
-                    }
-                    // Handle F keys for fuzzy search
-                    KeyCode::F(1)
-                    | KeyCode::F(2)
-                    | KeyCode::F(3)
-                    | KeyCode::F(4)
-                    | KeyCode::F(5)
-                    | KeyCode::F(6)
-                    | KeyCode::F(7)
-                    | KeyCode::F(8)
-                    | KeyCode::F(9)
-                    | KeyCode::F(10)
-                    | KeyCode::F(11)
-                    | KeyCode::F(12) => {
-                        if !fuzzy_search_active {
-                            fuzzy_search_active = true;
-                            fuzzy_search_input.clear();
-                        }
-                    }
-                    // Handle character input for fuzzy search - but exclude 'f' and '/' which are handled separately
-                    KeyCode::Char(c) if fuzzy_search_active => {
-                        fuzzy_search_input.push(c);
-                    }
-                    // Handle backspace in fuzzy search
-                    KeyCode::Backspace if fuzzy_search_active => {
-                        fuzzy_search_input.pop();
-                    }
-                    // Handle Enter to exit fuzzy search
-                    KeyCode::Enter if fuzzy_search_active => {
+            match key.code {
+                KeyCode::Char('q') => break,
+                KeyCode::Esc => {
+                    // Exit fuzzy search if active, otherwise exit process view mode if currently in it
+                    if fuzzy_search_active {
                         fuzzy_search_active = false;
+                        fuzzy_search_input.clear();
+                    } else if show_process_view {
+                        show_process_view = false;
                     }
-                    // Sorting controls
-                    KeyCode::Char('s') => {
-                        // Cycle through sorting options: Memory -> Name -> PID -> Memory...
-                        sort_by = match sort_by {
-                            ProcessSortBy::Memory => ProcessSortBy::Name,
-                            ProcessSortBy::Name => ProcessSortBy::Pid,
-                            ProcessSortBy::Pid => ProcessSortBy::Memory,
-                        };
-                    }
-                    KeyCode::Char('r') => {
-                        // Reverse sort order
-                        sort_reverse = !sort_reverse;
-                    }
-                    // Process selection controls
-                    KeyCode::Char('p') if show_process_view && !fuzzy_search_active => {
-                        // Toggle process selection mode
-                        process_selection_enabled = !process_selection_enabled;
-                        if !process_selection_enabled {
-                            selected_process_pid = None;
-                        }
-                    }
-                    KeyCode::Char(' ') if process_selection_enabled && show_process_view => {
-                        // Select the currently highlighted process
-                        if let Ok(processes) = get_gpu_processes(&gpu_list[selected_gpu]) {
-                            if highlighted_process_index < processes.len() {
-                                if let Some(proc) = processes.get(highlighted_process_index) {
-                                    selected_process_pid = Some(proc.pid);
-                                    process_selection_enabled = false;
-                                }
-                            }
-                        }
-                    }
-                    KeyCode::Up if process_selection_enabled && show_process_view => {
-                        // Move highlight up
-                        highlighted_process_index = highlighted_process_index.saturating_sub(1);
-                    }
-                    KeyCode::Down if process_selection_enabled && show_process_view => {
-                        // Move highlight down
-                        if let Ok(processes) = get_gpu_processes(&gpu_list[selected_gpu]) {
-                            if highlighted_process_index < processes.len().saturating_sub(1) {
-                                highlighted_process_index += 1;
-                            }
-                        }
-                    }
-                    KeyCode::F(n)
-                        if (1..=gpu_list.len()).contains(&n.into()) && !fuzzy_search_active =>
-                    {
-                        selected_gpu = usize::from(n - 1)
-                    }
-
-                    #[cfg(target_os = "linux")]
-                    KeyCode::Char('p') => {
-                        // re-scan pci tree to let driver discover new devices (only works as sudo)
-                        match nvml.discover_gpus(PciInfo {
-                            bus: 0,
-                            bus_id: "".into(),
-                            device: 0,
-                            domain: 0,
-                            pci_device_id: 0,
-                            pci_sub_system_id: Some(0),
-                        }) {
-                            Ok(()) => {
-                                have_fans = gpu_list
-                                    .iter()
-                                    .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
-
-                                lh.debug(&format!("GPU has fans = {}", have_fans));
-                                lh.debug("Re-scanned PCI tree");
-                            }
-                            Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
-                                lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
-                            }
-                            Err(e) => return Err(e.into()),
-                        }
-                        // re-scan for devices
-                        gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
-                        if selected_gpu >= gpu_list.len() {
-                            selected_gpu = 0;
-                        }
-                    }
-                    _ => {}
                 }
+                KeyCode::Char('f') | KeyCode::Char('/') => {
+                    // Always activate fuzzy search when '/' is pressed
+                    show_process_view = true;
+                    fuzzy_search_active = true;
+                    fuzzy_search_input.clear();
+                }
+                // Handle F keys for fuzzy search
+                KeyCode::F(1)
+                | KeyCode::F(2)
+                | KeyCode::F(3)
+                | KeyCode::F(4)
+                | KeyCode::F(5)
+                | KeyCode::F(6)
+                | KeyCode::F(7)
+                | KeyCode::F(8)
+                | KeyCode::F(9)
+                | KeyCode::F(10)
+                | KeyCode::F(11)
+                | KeyCode::F(12) => {
+                    if !fuzzy_search_active {
+                        fuzzy_search_active = true;
+                        fuzzy_search_input.clear();
+                    }
+                }
+                // Handle character input for fuzzy search - but exclude 'f' and '/' which are handled separately
+                KeyCode::Char(c) if fuzzy_search_active => {
+                    fuzzy_search_input.push(c);
+                }
+                // Handle backspace in fuzzy search
+                KeyCode::Backspace if fuzzy_search_active => {
+                    fuzzy_search_input.pop();
+                }
+                // Handle Enter to exit fuzzy search
+                KeyCode::Enter if fuzzy_search_active => {
+                    fuzzy_search_active = false;
+                }
+                // Sorting controls
+                KeyCode::Char('s') => {
+                    // Cycle through sorting options: Memory -> Name -> PID -> Memory...
+                    sort_by = match sort_by {
+                        ProcessSortBy::Memory => ProcessSortBy::Name,
+                        ProcessSortBy::Name => ProcessSortBy::Pid,
+                        ProcessSortBy::Pid => ProcessSortBy::Memory,
+                    };
+                }
+                KeyCode::Char('r') => {
+                    // Reverse sort order
+                    sort_reverse = !sort_reverse;
+                }
+                // Process selection controls
+                KeyCode::Char('p') if show_process_view && !fuzzy_search_active => {
+                    // Toggle process selection mode
+                    process_selection_enabled = !process_selection_enabled;
+                    if !process_selection_enabled {
+                        selected_process_pid = None;
+                    }
+                }
+                KeyCode::Char(' ') if process_selection_enabled && show_process_view => {
+                    // Select the currently highlighted process
+                    if let Ok(processes) = get_gpu_processes(&gpu_list[selected_gpu])
+                        && highlighted_process_index < processes.len()
+                        && let Some(proc) = processes.get(highlighted_process_index)
+                    {
+                        selected_process_pid = Some(proc.pid);
+                        process_selection_enabled = false;
+                    }
+                }
+                KeyCode::Up if process_selection_enabled && show_process_view => {
+                    // Move highlight up
+                    highlighted_process_index = highlighted_process_index.saturating_sub(1);
+                }
+                KeyCode::Down if process_selection_enabled && show_process_view => {
+                    // Move highlight down
+                    if let Ok(processes) = get_gpu_processes(&gpu_list[selected_gpu])
+                        && highlighted_process_index < processes.len().saturating_sub(1)
+                    {
+                        highlighted_process_index += 1;
+                    }
+                }
+                KeyCode::F(n)
+                    if (1..=gpu_list.len()).contains(&n.into()) && !fuzzy_search_active =>
+                {
+                    selected_gpu = usize::from(n - 1)
+                }
+
+                #[cfg(target_os = "linux")]
+                KeyCode::Char('p') => {
+                    // re-scan pci tree to let driver discover new devices (only works as sudo)
+                    match nvml.discover_gpus(PciInfo {
+                        bus: 0,
+                        bus_id: "".into(),
+                        device: 0,
+                        domain: 0,
+                        pci_device_id: 0,
+                        pci_sub_system_id: Some(0),
+                    }) {
+                        Ok(()) => {
+                            have_fans = gpu_list
+                                .iter()
+                                .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
+
+                            lh.debug(&format!("GPU has fans = {}", have_fans));
+                            lh.debug("Re-scanned PCI tree");
+                        }
+                        Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
+                            lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+                    // re-scan for devices
+                    gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
+                    if selected_gpu >= gpu_list.len() {
+                        selected_gpu = 0;
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -459,7 +459,6 @@ fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
         .ratio(mem_percentage)
 }
 
-
 fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         "Card Info",
@@ -485,9 +484,6 @@ fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
         .block(block)
         .wrap(Wrap { trim: true })
 }
-
-// Helper function to get process-specific information
-
 
 fn draw_misc_with_processes<'d>(
     gpu: &GpuInfo<'d>,
@@ -568,12 +564,11 @@ fn draw_misc_with_processes<'d>(
                 if processes.is_empty() && !search_term.is_empty() {
                     format!("No processes match '{}'", search_term)
                 } else {
-                    // Show only processes without redundant header
                     let mut content = String::new();
+                    //TODO: Nicer stringing without these manual spaces...
                     content.push_str("Name                                    PID              Memory(MB)  Type\n");
-                    for (idx, proc) in processes.iter().take(20).enumerate() {
-                        // Show top 20 processes
-                        let memory_mb = proc.used_memory / 1024 / 1024; // Convert bytes to MB
+                    for (idx, proc) in processes.iter().take(40).enumerate() {
+                        let memory_mb = proc.used_memory / 1024 / 1024;
 
                         // Determine process type (this is a simplified approach)
                         let process_type = if proc.name.contains("comp")
@@ -589,6 +584,7 @@ fn draw_misc_with_processes<'d>(
                         let row_prefix = "  "; // Using spaces for appearance
 
                         // Highlight the currently selected/highlighted process
+                        //BUG: this doesn't work...
                         let line = if process_selection_enabled && idx == highlighted_process_index
                         {
                             format!(
@@ -690,7 +686,7 @@ fn fuzzy_match(text: &str, pattern: &str) -> bool {
     pattern_idx == pattern_chars.len()
 }
 
-// Helper function to score fuzzy matches (higher score = better match)
+// Helper to score fuzzy matches (higher score = better match)
 fn fuzzy_score(text: &str, pattern: &str) -> i32 {
     if pattern.is_empty() {
         return 0;
@@ -703,7 +699,7 @@ fn fuzzy_score(text: &str, pattern: &str) -> i32 {
         return -1; // No match
     }
 
-    // Calculate score based on match quality
+    // Calculate match quality
     let mut score = 0;
     let text_chars: Vec<char> = text_lower.chars().collect();
     let pattern_chars: Vec<char> = pattern_lower.chars().collect();
@@ -737,27 +733,16 @@ fn fuzzy_score(text: &str, pattern: &str) -> i32 {
     score
 }
 
-// Structure to represent a process running on the GPU
-#[derive(Debug)]
-struct GpuProcess {
-    pid: u32,
-    used_memory: u64,
-    name: String, // Process name
-}
-
-// Function to retrieve processes running on the GPU
 fn get_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Result<Vec<GpuProcess>, NvmlError> {
     let mut gpu_processes = Vec::new();
 
-    // Try to get compute processes
     if let Ok(compute_processes) = gpu.inner.running_compute_processes() {
         for process in compute_processes {
             let name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
                 Ok(name) => name.trim().to_string(),
-                Err(_) => format!("Process-{}", process.pid), // Fallback if we can't get the name
+                Err(_) => format!("Process-{}", process.pid),
             };
 
-            // Access memory value for compute processes - it's a direct UsedGpuMemory value
             let memory_value = extract_memory_value(process.used_gpu_memory);
 
             gpu_processes.push(GpuProcess {
@@ -768,17 +753,14 @@ fn get_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Result<Vec<GpuProcess>, NvmlError
         }
     }
 
-    // Also try to get graphics processes to get a complete picture
     if let Ok(graphics_processes) = gpu.inner.running_graphics_processes() {
         for process in graphics_processes {
-            // Check if this process is already in our list (from compute processes)
             if !gpu_processes.iter().any(|p| p.pid == process.pid) {
                 let name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
                     Ok(name) => name.trim().to_string(),
-                    Err(_) => format!("Process-{}", process.pid), // Fallback if we can't get the name
+                    Err(_) => format!("Process-{}", process.pid),
                 };
 
-                // Extract memory value for graphics process - based on the error, it's UsedGpuMemory (not optional)
                 let memory_value = extract_memory_value(process.used_gpu_memory);
 
                 gpu_processes.push(GpuProcess {
@@ -793,25 +775,16 @@ fn get_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Result<Vec<GpuProcess>, NvmlError
     Ok(gpu_processes)
 }
 
-// Helper function to extract the memory value from UsedGpuMemory enum
-// Using a direct approach with the actual enum structure
 fn extract_memory_value(used_memory: nvml_wrapper::enums::device::UsedGpuMemory) -> u64 {
-    // Since we can't determine the exact API, let's use a different approach
-    // by converting the enum to a string and extracting the value
     let s = format!("{:?}", used_memory);
 
-    // Look for the pattern where the memory value appears in the debug output
-    // For example, if it looks like "Unrestricted(123456)" or similar
-    if let Some(start) = s.find('(') {
-        if let Some(end) = s.find(')') {
-            if start < end {
-                let num_str = &s[start + 1..end];
-                return num_str.parse::<u64>().unwrap_or(0);
-            }
-        }
+    if let Some(start) = s.find('(')
+        && let Some(end) = s.find(')')
+        && start < end
+    {
+        let num_str = &s[start + 1..end];
+        return num_str.parse::<u64>().unwrap_or(0);
     }
-
-    // If the pattern isn't found, try to extract any number from the string
     s.chars()
         .filter(|c| c.is_ascii_digit())
         .collect::<String>()
