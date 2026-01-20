@@ -18,6 +18,13 @@ use crate::stylers::calculate_severity;
 use crate::termite::LoggingHandle;
 use crate::{errors, gpu::GpuInfo};
 
+#[derive(Clone, PartialEq)]
+enum ProcessSortBy {
+    Memory,
+    Name,
+    Pid,
+}
+
 pub fn run(
     nvml: nvml_wrapper::Nvml,
     delay: Duration,
@@ -40,6 +47,14 @@ pub fn run(
     let mut show_process_view: bool = true; // Always show process view as requested
     let mut fuzzy_search_active: bool = false;
     let mut fuzzy_search_input: String = String::new();
+
+    let mut sort_by: ProcessSortBy = ProcessSortBy::Memory;
+    let mut sort_reverse: bool = true; // Descending by default
+
+    // State for process selection
+    let mut selected_process_pid: Option<u32> = None;
+    let mut process_selection_enabled: bool = false;
+    let mut highlighted_process_index: usize = 0;
 
     lh.debug(&format!("GPU has fans = {}", have_fans));
 
@@ -102,7 +117,11 @@ pub fn run(
                 // Render the main footer text
                 f.render_widget(
                     if show_process_view {
-                        Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices, ESC to return to stats, f or / to search".to_string())
+                        if process_selection_enabled {
+                            Paragraph::new("q to quit, ESC to return to stats, f or / to search, s to sort, r to reverse, UP/DOWN to navigate, SPACE to select, p to exit".to_string())
+                        } else {
+                            Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices, ESC to return to stats, f or / to search, s to sort, r to reverse, p to select process".to_string())
+                        }
                     } else {
                         Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices, f or / to show processes".to_string())
                     },
@@ -123,66 +142,73 @@ pub fn run(
                 .style(Style::default());
             f.render_widget(block, mid_area);
 
-            let chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
+            // Main vertical layout: top for card info, middle for metrics, bottom for processes
+            let main_layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3), // Top 3 lines for card info
+                    Constraint::Percentage(50), // Middle 50% for metrics
+                    Constraint::Percentage(45), // Bottom 45% for processes
+                ])
                 .margin(1)
                 .split(f.area());
 
-            {
-                let chunks = Layout::default()
-                    .constraints(vec![
-                        Constraint::Percentage(60),
-                        Constraint::Percentage(20),
-                        Constraint::Percentage(20),
-                    ])
-                    .margin(1)
-                    .split(chunks[0]);
+            // Top section: Card info (single line)
+            let top_chunk = main_layout[0];
+            let card_info_widget = draw_driver_info(gpu);
+            f.render_widget(card_info_widget, top_chunk);
 
-                // Core:
-                let core_gauge = draw_core_utilisation(gpu);
-                f.render_widget(core_gauge, chunks[0]);
+            // Middle section: Metrics (core util, temp, memory, etc.)
+            let middle_area = main_layout[1];
+            let middle_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(70),
+                    Constraint::Percentage(30),
+                ])
+                .split(middle_area);
 
-                // Core Clock:
-                let core_gauge = draw_core_clock(gpu).unwrap();
-                f.render_widget(core_gauge, chunks[1]);
+            let left_middle = Layout::default()
+                .constraints([
+                    Constraint::Percentage(50), // Core utilization
+                    Constraint::Percentage(50), // Core Clock
+                ])
+                .split(middle_chunks[0]);
 
-                if !show_process_view {
-                    // Misc (normal view):
-                    let paragraph = draw_misc(gpu);
-                    f.render_widget(paragraph, chunks[2]);
-                } else {
-                    // Combined misc and processes view
-                    let process_widget = draw_misc_with_processes(gpu, &fuzzy_search_input);
-                    f.render_widget(process_widget, chunks[2]);
-                }
+            // Core utilization
+            let core_gauge = draw_core_utilisation(gpu);
+            f.render_widget(core_gauge, left_middle[0]);
+
+            // Core Clock
+            let core_gauge = draw_core_clock(gpu).unwrap();
+            f.render_widget(core_gauge, left_middle[1]);
+
+            // Right side of middle: Memory, Temp, Fan - adjusted to align with left panels
+            let right_middle = Layout::default()
+                .constraints([
+                    Constraint::Percentage(50), // Memory
+                    Constraint::Percentage(25), // Temp (half height)
+                    Constraint::Percentage(25), // Fan speed (half height)
+                ])
+                .split(middle_chunks[1]);
+
+            // Memory:
+            let mem_usage_gauge = draw_memory_usage(gpu);
+            f.render_widget(mem_usage_gauge, right_middle[0]);
+
+            // Temp:
+            let temp_gauge = draw_gpu_die_temp(gpu);
+            f.render_widget(temp_gauge, right_middle[1]);
+
+            // Fan speed:
+            if have_fans {
+                let gauge = draw_fan_speed(gpu);
+                f.render_widget(gauge, right_middle[2]);
             }
 
-            {
-                let chunks = Layout::default()
-                    .constraints([
-                        Constraint::Percentage(33),
-                        Constraint::Percentage(33),
-                        Constraint::Percentage(33),
-                    ])
-                    .direction(Direction::Vertical)
-                    .margin(1)
-                    .split(chunks[1]);
-
-                // Memory:
-                let mem_usage_gauge = draw_memory_usage(gpu);
-                f.render_widget(mem_usage_gauge, chunks[0]);
-
-                // Temp:
-                let temp_gauge = draw_gpu_die_temp(gpu);
-                f.render_widget(temp_gauge, chunks[1]);
-
-                // Fan speed:
-                if have_fans {
-                    let gauge = draw_fan_speed(gpu);
-                    f.render_widget(gauge, chunks[2]);
-                }
-            }
+            // Bottom section: Processes (always shown)
+            let process_widget = draw_misc_with_processes(gpu, &fuzzy_search_input, &sort_by, sort_reverse, process_selection_enabled, highlighted_process_index, selected_process_pid);
+            f.render_widget(process_widget, main_layout[2]);
 
             // If fuzzy search is active, render a modal-style search box in the center as an overlay
             if fuzzy_search_active {
@@ -270,6 +296,50 @@ pub fn run(
                     // Handle Enter to exit fuzzy search
                     KeyCode::Enter if fuzzy_search_active => {
                         fuzzy_search_active = false;
+                    }
+                    // Sorting controls
+                    KeyCode::Char('s') => {
+                        // Cycle through sorting options: Memory -> Name -> PID -> Memory...
+                        sort_by = match sort_by {
+                            ProcessSortBy::Memory => ProcessSortBy::Name,
+                            ProcessSortBy::Name => ProcessSortBy::Pid,
+                            ProcessSortBy::Pid => ProcessSortBy::Memory,
+                        };
+                    }
+                    KeyCode::Char('r') => {
+                        // Reverse sort order
+                        sort_reverse = !sort_reverse;
+                    }
+                    // Process selection controls
+                    KeyCode::Char('p') if show_process_view && !fuzzy_search_active => {
+                        // Toggle process selection mode
+                        process_selection_enabled = !process_selection_enabled;
+                        if !process_selection_enabled {
+                            selected_process_pid = None;
+                        }
+                    }
+                    KeyCode::Char(' ') if process_selection_enabled && show_process_view => {
+                        // Select the currently highlighted process
+                        if let Ok(processes) = get_gpu_processes(&gpu_list[selected_gpu]) {
+                            if highlighted_process_index < processes.len() {
+                                if let Some(proc) = processes.get(highlighted_process_index) {
+                                    selected_process_pid = Some(proc.pid);
+                                    process_selection_enabled = false;
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Up if process_selection_enabled && show_process_view => {
+                        // Move highlight up
+                        highlighted_process_index = highlighted_process_index.saturating_sub(1);
+                    }
+                    KeyCode::Down if process_selection_enabled && show_process_view => {
+                        // Move highlight down
+                        if let Ok(processes) = get_gpu_processes(&gpu_list[selected_gpu]) {
+                            if highlighted_process_index < processes.len().saturating_sub(1) {
+                                highlighted_process_index += 1;
+                            }
+                        }
                     }
                     KeyCode::F(n)
                         if (1..=gpu_list.len()).contains(&n.into()) && !fuzzy_search_active =>
@@ -405,9 +475,93 @@ fn draw_misc<'d>(gpu: &'d GpuInfo<'d>) -> Paragraph<'d> {
         .wrap(Wrap { trim: true })
 }
 
-fn draw_misc_with_processes<'d>(gpu: &GpuInfo<'d>, search_term: &str) -> Paragraph<'d> {
+// Function to draw the driver info panel
+fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        "Misc/Processes",
+        "Driver Info",
+        Style::default()
+            .fg(Color::Blue)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    let compute_cap = match gpu.inner.cuda_compute_capability() {
+        Ok(cap) => format!("{}.{}", cap.major, cap.minor),
+        Err(_) => "N/A".to_string(),
+    };
+
+    let info_text = format!(
+        "Card: {}\nDriver: {}\nCUDA: {:.1}\nCompute Cap: {}",
+        gpu.card_type,
+        gpu.driver_version,
+        gpu.cuda_version / 1000.0,
+        compute_cap
+    );
+
+    Paragraph::new(info_text)
+        .block(block)
+        .wrap(Wrap { trim: true })
+}
+
+// Helper function to get process-specific information
+fn get_process_specific_info<'d>(gpu: &GpuInfo<'d>, pid: u32) -> String {
+    match get_gpu_processes(gpu) {
+        Ok(processes) => {
+            if let Some(proc) = processes.iter().find(|p| p.pid == pid) {
+                format!(
+                    "PID: {}\nProcess: {}\nMemory: {} MB",
+                    proc.pid,
+                    proc.name,
+                    proc.used_memory / 1024 / 1024
+                )
+            } else {
+                format!("PID: {}\nProcess: Unknown\nMemory: N/A", pid)
+            }
+        }
+        Err(_) => {
+            format!("PID: {}\nProcess: Error retrieving info", pid)
+        }
+    }
+}
+
+// Function to draw process-specific info
+fn draw_process_info<'d>(_gpu: &GpuInfo<'d>, process_info: &'d str) -> Paragraph<'d> {
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        "Selected Process",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    Paragraph::new(process_info)
+        .block(block)
+        .wrap(Wrap { trim: true })
+}
+
+// Function to draw process-specific clock info
+fn draw_process_clock_info<'d>(_gpu: &GpuInfo<'d>, process_info: &'d str) -> Paragraph<'d> {
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        "Process Details",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    Paragraph::new(process_info)
+        .block(block)
+        .wrap(Wrap { trim: true })
+}
+
+fn draw_misc_with_processes<'d>(
+    gpu: &GpuInfo<'d>,
+    search_term: &str,
+    sort_by: &ProcessSortBy,
+    sort_reverse: bool,
+    process_selection_enabled: bool,
+    highlighted_process_index: usize,
+    selected_process_pid: Option<u32>,
+) -> Paragraph<'d> {
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        "GPU Processes",
         Style::default()
             .fg(Color::Magenta)
             .add_modifier(Modifier::BOLD),
@@ -441,24 +595,81 @@ fn draw_misc_with_processes<'d>(gpu: &GpuInfo<'d>, search_term: &str) -> Paragra
                     // Extract just the processes in ranked order
                     processes = scored_processes.into_iter().map(|(proc, _)| proc).collect();
                 } else {
-                    // Sort by memory usage when not searching
-                    processes.sort_by(|a, b| b.used_memory.cmp(&a.used_memory));
+                    // Sort by selected column when not searching
+                    match sort_by {
+                        ProcessSortBy::Memory => {
+                            if sort_reverse {
+                                processes.sort_by(|a, b| b.used_memory.cmp(&a.used_memory));
+                            // Descending
+                            } else {
+                                processes.sort_by(|a, b| a.used_memory.cmp(&b.used_memory));
+                                // Ascending
+                            }
+                        }
+                        ProcessSortBy::Name => {
+                            if sort_reverse {
+                                processes.sort_by(|a, b| {
+                                    b.name.to_lowercase().cmp(&a.name.to_lowercase())
+                                }); // Descending
+                            } else {
+                                processes.sort_by(|a, b| {
+                                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                                }); // Ascending
+                            }
+                        }
+                        ProcessSortBy::Pid => {
+                            if sort_reverse {
+                                processes.sort_by(|a, b| b.pid.cmp(&a.pid)); // Descending
+                            } else {
+                                processes.sort_by(|a, b| a.pid.cmp(&b.pid)); // Ascending
+                            }
+                        }
+                    }
                 }
 
                 if processes.is_empty() && !search_term.is_empty() {
-                    format!("{}\n\nNo processes match '{}'", gpu.misc, search_term)
+                    format!("No processes match '{}'", search_term)
                 } else {
-                    let mut content = gpu.misc.clone();
-                    content.push_str("\n\nProcesses:\n");
-                    content.push_str("Name                 PID      Memory(MB)\n");
-                    for proc in processes.iter().take(10) {
-                        // Show top 10 processes
+                    // Show only processes without redundant header
+                    let mut content = String::new();
+                    content.push_str("Name                                    PID              Memory(MB)  Type\n");
+                    for (idx, proc) in processes.iter().take(20).enumerate() {
+                        // Show top 20 processes
                         let memory_mb = proc.used_memory / 1024 / 1024; // Convert bytes to MB
-                                                                        // Format with right-aligned memory usage
-                        content.push_str(&format!(
-                            "{:<20} {:>10} {:>10} MB\n",
-                            proc.name, proc.pid, memory_mb
-                        ));
+
+                        // Determine process type (this is a simplified approach)
+                        let process_type = if proc.name.contains("comp")
+                            || proc.name.contains("cuda")
+                            || proc.name.contains("nvidia")
+                        {
+                            "C" // Compute
+                        } else {
+                            "G" // Graphics
+                        };
+
+                        // Alternate row colors for better readability
+                        let row_prefix = if idx % 2 == 0 { "  " } else { "  " }; // Using spaces for alternating appearance
+
+                        // Highlight the currently selected/highlighted process
+                        let line = if process_selection_enabled && idx == highlighted_process_index
+                        {
+                            format!(
+                                "> {:<38} {:>15} {:>13} MB  {}\n",
+                                proc.name, proc.pid, memory_mb, process_type
+                            )
+                        } else if selected_process_pid == Some(proc.pid) {
+                            format!(
+                                "* {:<38} {:>15} {:>13} MB  {}\n",
+                                proc.name, proc.pid, memory_mb, process_type
+                            )
+                        } else {
+                            format!(
+                                "{}{:<38} {:>15} {:>13} MB  {}\n",
+                                row_prefix, proc.name, proc.pid, memory_mb, process_type
+                            )
+                        };
+
+                        content.push_str(&line);
                     }
                     content
                 }
@@ -567,8 +778,10 @@ fn fuzzy_score(text: &str, pattern: &str) -> i32 {
     while text_idx < text_chars.len() && pattern_idx < pattern_chars.len() {
         if text_chars[text_idx] == pattern_chars[pattern_idx] {
             // Bonus for consecutive matches
-            if text_idx > 0 && pattern_idx > 0 &&
-               text_chars[text_idx - 1] == pattern_chars[pattern_idx - 1] {
+            if text_idx > 0
+                && pattern_idx > 0
+                && text_chars[text_idx - 1] == pattern_chars[pattern_idx - 1]
+            {
                 consecutive_bonus += 10;
             } else {
                 consecutive_bonus = 10; // Base bonus for a match
