@@ -215,7 +215,7 @@ pub fn run(
                 let search_text = format!("{}_", &fuzzy_search_input);
                 let block = Block::default()
                     .borders(Borders::ALL)
-                    .title("🔍 Fuzzy Search - Type to search (ESC to cancel)")
+                    .title("🔍... [ESC to cancel]")
                     .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
 
                 let search_input = Paragraph::new(search_text)
@@ -478,7 +478,7 @@ fn draw_misc<'d>(gpu: &'d GpuInfo<'d>) -> Paragraph<'d> {
 // Function to draw the driver info panel
 fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        "Driver Info",
+        "Card Info",
         Style::default()
             .fg(Color::Blue)
             .add_modifier(Modifier::BOLD),
