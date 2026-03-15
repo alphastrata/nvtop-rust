@@ -19,7 +19,7 @@ _art by stable-diffusion + Maz_
 - [troubleshooting](#troubleshooting)
 
 `nvtop` is a command-line utility that provides a replacement for some of the output from `nvidia-smi` (System Management Interface).
-It offers real-time monitoring and visualization of GPU information: Core Clock, Temps, Fanspeed and Memory Usage.
+It offers real-time monitoring and visualisation of GPU information: Core Clock, Temps, Fanspeed and Memory Usage.
 
 ______________________________________________________________________
 
@@ -46,6 +46,19 @@ nvtop
 nvtop --log <PATH TO CREATE A LOGFILE @>
 ```
 
+<details>
+### Keyboard Shortcuts:
+
+| Shortcut | Functionality |
+|----------|---------------|
+| `f` or `/` | Search processes (fuzzy) |
+| `s` | 'Sort' [Name || Pid || Memory Usage] |
+| `p` | Processes (up / down arrows) |
+| `r` | Reverse (processes list ordering) |
+| `m` | Multi-Gpu Rescan PCIe devices (Linux Only, multi-gpu systems only.) |
+| `q` | Quit |
+
+</details>
 ______________________________________________________________________
 
 ### Prerequisites
@@ -154,6 +167,6 @@ ______________________________________________________________________
 ### Advice for contributors:
 
 - if you touch the readme, please format it with `mdformat` (`pip install mdformat`).
-- if you touch python scrpits, please format them with `black` (`pip install black`).
+- if you touch python scripts, please format them with `black` (`pip install black`).
 - always run these `cargo test`, `cargo check`, `cargo clippy` -- please don't make PRs until any issues those tools flag are resolved.
 - if this is your first time contributing to open source, _wow! thank you_.

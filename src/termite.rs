@@ -92,13 +92,11 @@ impl LoggingHandle {
     }
 
     fn write_to_log(log_path: &Path, msg: &str) {
-        // Open the log file in append mode, creating it if it doesn't exist
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_path).unwrap_or_else(|_| panic!("Unable to create {}.\nAs a result of this we cannot write logs. So the app will crash.", log_path.display()));
 
-        // Write the message to the log file
         file.write_all(msg.as_bytes())
             .expect("Unable to write log to file -- We chose to exit the app when this happens.");
     }
