@@ -1,0 +1,3 @@
+[build]
+rustc-wrapper = "/home/jer/.cargo/bin/sccache"
+

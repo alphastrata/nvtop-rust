@@ -48,7 +48,7 @@ pub fn run(
     let mut selected_gpu: usize = 0;
     let mut have_fans: bool = gpu_list
         .iter()
-        .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
+        .any(|gpu| gpu.inner.num_fans().unwrap_or(0) != 0);
 
     // State variables for process view
     let mut show_process_view: bool = true;
@@ -111,7 +111,7 @@ pub fn run(
                     Tabs::new(
                         gpu_list
                             .iter()
-                            .map(|gpu| format!("[{}] {}", gpu.index, gpu.card_type))
+                            .map(|gpu| format!("[{}] {}", gpu.index, gpu.name))
                             .collect::<Vec<_>>(),
                     )
                     .select(selected_gpu)
@@ -218,7 +218,7 @@ pub fn run(
 
             // If fuzzy search is active, render a modal-style search box in the Center as an overlay
             if fuzzy_search_active {
-                let search_text = format!("{}_", &fuzzy_search_input);
+                let search_text = format!("{}_", fuzzy_search_input);
                 let block = Block::default()
                     .borders(Borders::ALL)
                     .title("🔍... [ESC to cancel]")
@@ -237,17 +237,14 @@ pub fn run(
 
                 let search_area = Rect::new(x, y, search_width, search_height);
 
-                // Draw a semi-transparent overlay background
-                let overlay = Paragraph::new(" ")
-                    .style(Style::default().bg(Color::Rgb(20, 20, 20))); // Very dark semi-transparent?
-
-                f.render_widget(overlay, f.area());
+                f.render_widget(Clear, search_area);
                 f.render_widget(search_input, search_area);
             }
         })?;
 
         if crossterm::event::poll(std::time::Duration::from_millis(250))?
             && let crossterm::event::Event::Key(key) = crossterm::event::read()?
+            && key.kind == crossterm::event::KeyEventKind::Press
         {
             use crossterm::event::KeyCode;
 
@@ -262,21 +259,17 @@ pub fn run(
                         show_process_view = false;
                     }
                 }
-                KeyCode::Char('f') | KeyCode::Char('/') => {
-                    // Always activate fuzzy search when '/' is pressed
+                KeyCode::Char('f' | '/') if !fuzzy_search_active => {
                     show_process_view = true;
                     fuzzy_search_active = true;
                     fuzzy_search_input.clear();
                 }
-                // Handle character input for fuzzy search - but exclude 'f' and '/' which are handled separately
                 KeyCode::Char(c) if fuzzy_search_active => {
                     fuzzy_search_input.push(c);
                 }
-                // Handle backspace in fuzzy search
                 KeyCode::Backspace if fuzzy_search_active => {
                     fuzzy_search_input.pop();
                 }
-                // Handle Enter to exit fuzzy search
                 KeyCode::Enter if fuzzy_search_active => {
                     fuzzy_search_active = false;
                 }
@@ -323,7 +316,7 @@ pub fn run(
                         highlighted_process_index += 1;
                     }
                 }
-               
+
                 #[cfg(target_os = "linux")]
                 KeyCode::Char('m') => {
                     // re-scan pci tree to let driver discover new devices (only works as sudo)
@@ -338,7 +331,7 @@ pub fn run(
                         Ok(()) => {
                             have_fans = gpu_list
                                 .iter()
-                                .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
+                                .any(|gpu| gpu.inner.num_fans().unwrap_or(0) != 0);
 
                             lh.debug(&format!("GPU has fans = {}", have_fans));
                             lh.debug("Re-scanned PCI tree");
@@ -393,10 +386,7 @@ fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
 }
 
 fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
-    let gpu_die_temperature = gpu
-        .inner
-        .temperature(TemperatureSensor::Gpu)
-        .map_or(0, |temp| temp);
+    let gpu_die_temperature = gpu.inner.temperature(TemperatureSensor::Gpu).unwrap_or(0);
 
     let label = format!("{:.2}°C", gpu_die_temperature);
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
@@ -411,16 +401,13 @@ fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
 }
 
 fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
-    let mem_info = gpu.inner.memory_info().map_or(
-        MemoryInfo {
-            free: 0,
-            total: 0, //TODO: This never changes so put in self
-            used: 0,
-            reserved: Default::default(),
-            version: Default::default(),
-        },
-        |mem_info| mem_info,
-    );
+    let mem_info = gpu.inner.memory_info().unwrap_or(MemoryInfo {
+        free: 0,
+        total: 0, //TODO: This never changes so put in self
+        used: 0,
+        reserved: Default::default(),
+        version: Default::default(),
+    });
 
     let mem_used = mem_info.used as f64 / 1_073_741_824.0; // as GB
     let mem_total = mem_info.total as f64 / 1_073_741_824.0;
@@ -450,8 +437,8 @@ fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
     };
 
     let info_text = format!(
-        "Card: {:<15} | Driver: {:<12} | CUDA: {:<8} | Compute Cap: {}",
-        gpu.card_type,
+        "Card: {:<24} | Driver: {:<12} | CUDA: {:<8} | Compute Cap: {}",
+        gpu.name,
         gpu.driver_version,
         gpu.cuda_version / 1000.0,
         compute_cap
@@ -501,7 +488,7 @@ fn draw_misc_with_processes<'d>(
                     }
 
                     // Sort by score (descending) - highest scores first
-                    scored_processes.sort_by(|a, b| b.1.cmp(&a.1));
+                    scored_processes.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
 
                     // Extract just the processes in ranked order
                     processes = scored_processes.into_iter().map(|(proc, _)| proc).collect();
@@ -510,10 +497,11 @@ fn draw_misc_with_processes<'d>(
                     match sort_by {
                         ProcessSortBy::Memory => {
                             if sort_reverse {
-                                processes.sort_by(|a, b| b.used_memory.cmp(&a.used_memory));
+                                processes
+                                    .sort_by_key(|process| std::cmp::Reverse(process.used_memory));
                             // Descending
                             } else {
-                                processes.sort_by(|a, b| a.used_memory.cmp(&b.used_memory));
+                                processes.sort_by_key(|a| a.used_memory);
                                 // Ascending
                             }
                         }
@@ -530,9 +518,9 @@ fn draw_misc_with_processes<'d>(
                         }
                         ProcessSortBy::Pid => {
                             if sort_reverse {
-                                processes.sort_by(|a, b| b.pid.cmp(&a.pid)); // Descending
+                                processes.sort_by_key(|process| std::cmp::Reverse(process.pid));
                             } else {
-                                processes.sort_by(|a, b| a.pid.cmp(&b.pid)); // Ascending
+                                processes.sort_by_key(|a| a.pid); // Ascending
                             }
                         }
                     }

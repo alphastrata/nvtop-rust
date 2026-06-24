@@ -18,7 +18,7 @@ pub struct GpuInfo<'d> {
     pub inner: Device<'d>,
     pub max_memory_clock: u32,
     pub max_core_clock: u32,
-    pub card_type: String,
+    pub name: String,
     pub driver_version: String,
     pub cuda_version: f32,
     pub misc: String,
@@ -28,13 +28,14 @@ pub struct GpuInfo<'d> {
 impl<'d> GpuInfo<'d> {
     pub fn from_device(index: u32, device: Device<'d>) -> Result<Self, NvmlError> {
         // Do some setup for things that will _not_ change, i.e driver version etc.
-        let card_type = format!("{:?}", device.brand()?);
+        let brand = format!("{:?}", device.brand()?);
+        let name = device.name().unwrap_or_else(|_| brand.clone());
         let driver_version = device.nvml().sys_driver_version()?;
         let cuda_version = device.nvml().sys_cuda_driver_version()? as f32;
 
         let misc = format!(
-            "Card: {:?}    Driver Version: {}    CUDA Version: {}",
-            card_type,
+            "Card: {}    Driver Version: {}    CUDA Version: {}",
+            name,
             driver_version,
             cuda_version / 1000.0
         );
@@ -43,7 +44,7 @@ impl<'d> GpuInfo<'d> {
             max_memory_clock: device.max_clock_info(Clock::Memory)?,
             max_core_clock: device.max_clock_info(Clock::Graphics)?,
             num_cores: device.num_cores()?,
-            card_type,
+            name,
             driver_version,
             cuda_version,
             misc,
