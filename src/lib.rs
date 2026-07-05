@@ -4,3 +4,4 @@ pub mod gpu;
 pub mod nvtop_args;
 pub mod stylers;
 pub mod termite;
+pub mod daemon_processor;

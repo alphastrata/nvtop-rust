@@ -1,29 +1,36 @@
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
 use nvml_wrapper::Nvml;
 
-use nvtop::{app::run, errors::NvTopError, nvtop_args, termite::LoggingHandle};
+use nvtop::{app::run, errors::NvTopError, nvtop_args, termite::LoggingHandle, daemon_processor};
 
 fn main() -> Result<(), NvTopError> {
     let args = nvtop_args::Cli::parse();
 
     let mut lh = LoggingHandle::empty();
-    if args.log.is_some() {
-        let log_path = match args.log {
-            Some(lp) => lp,
-            None => PathBuf::from("nvtop.log"),
-        };
-        lh = LoggingHandle::init(log_path);
+    if let Some(log_path) = &args.log {
+        lh = LoggingHandle::init(log_path.clone());
     }
 
     // Init the GPU management-layer
     let nvml = Nvml::init()?;
-    lh.debug("Nvml init success");
+    lh.debug("Nvml base layer initialized successfully");
 
-    if let Err(e) = run(nvml, Duration::from_millis(args.delay), &lh) {
-        lh.error(&format!("app::run() -> {e}"));
+    if args.daemon {
+        lh.info("Daemon operational flag detected. Launching hayaku pipeline stream...");
+        daemon_processor::execute_streaming_daemon(
+            &nvml,
+            Duration::from_millis(args.delay),
+            &args.output,
+            args.hook_pid,
+            &lh,
+        )?;
+    } else {
+        if let Err(e) = run(nvml, Duration::from_millis(args.delay), &lh, args.hook_pid) {
+            lh.error(&format!("app::run() -> {e}"));
+        }
     }
 
     Ok(())

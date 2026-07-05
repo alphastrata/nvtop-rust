@@ -7,10 +7,19 @@ use std::{
 use nvml_wrapper::{
     Device, Nvml,
     enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
+    enums::device::UsedGpuMemory,
     error::NvmlError,
 };
 
 use crate::{errors::NvTopError, termite::LoggingHandle};
+
+#[derive(Debug, Clone)]
+pub struct GpuProcess {
+    pub pid: u32,
+    pub used_memory: u64,
+    pub name: String,
+    pub is_compute: bool,
+}
 
 #[derive(Debug)]
 pub struct GpuInfo<'d> {
@@ -138,6 +147,58 @@ pub fn try_init_gpus<'n>(
     }
 }
 
+pub fn get_gpu_processes(device: &Device) -> Result<Vec<GpuProcess>, NvmlError> {
+    let mut gpu_processes = Vec::new();
+
+    // 1. Ingest True Compute Context Processes Natively
+    if let Ok(compute_processes) = device.running_compute_processes() {
+        for process in compute_processes {
+            let memory_bytes = match process.used_gpu_memory {
+                UsedGpuMemory::Used(bytes) => bytes,
+                UsedGpuMemory::Unavailable => 0,
+            };
+
+            // NVML system queries fetch process names securely via the driver map layer
+            let name = device.nvml()
+                .sys_process_name(process.pid, 256)
+                .unwrap_or_else(|_| format!("Compute-{}", process.pid));
+
+            gpu_processes.push(GpuProcess {
+                pid: process.pid,
+                used_memory: memory_bytes,
+                name,
+                is_compute: true,
+            });
+        }
+    }
+
+    // 2. Ingest True Graphics Context Processes Natively
+    if let Ok(graphics_processes) = device.running_graphics_processes() {
+        for process in graphics_processes {
+            if !gpu_processes.iter().any(|p| p.pid == process.pid) {
+                let memory_bytes = match process.used_gpu_memory {
+                    UsedGpuMemory::Used(bytes) => bytes,
+                    UsedGpuMemory::Unavailable => 0,
+                };
+
+                let name = device.nvml()
+                    .sys_process_name(process.pid, 256)
+                    .unwrap_or_else(|_| format!("Graphics-{}", process.pid));
+
+                gpu_processes.push(GpuProcess {
+                    pid: process.pid,
+                    used_memory: memory_bytes,
+                    name,
+                    is_compute: false,
+                });
+            }
+        }
+    }
+
+    Ok(gpu_processes)
+}
+
+
 #[cfg(test)]
 mod tests {
     use nvml_wrapper::{
@@ -174,5 +235,19 @@ mod tests {
             });
             std::thread::sleep(std::time::Duration::from_secs(1));
         });
+    }
+
+    #[test]
+    fn test_get_gpu_processes() {
+        let nvml = match Nvml::init() {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        let device = match nvml.device_by_index(0) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        let processes = super::get_gpu_processes(&device);
+        assert!(processes.is_ok());
     }
 }

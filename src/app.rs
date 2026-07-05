@@ -16,7 +16,7 @@ use std::time::Duration;
 use crate::errors::NvTopError;
 use crate::stylers::calculate_severity;
 use crate::termite::LoggingHandle;
-use crate::{errors, gpu::GpuInfo};
+use crate::{errors, gpu::{GpuInfo, GpuProcess, get_gpu_processes}};
 
 #[derive(Clone, PartialEq)]
 enum ProcessSortBy {
@@ -25,17 +25,11 @@ enum ProcessSortBy {
     Pid,
 }
 
-#[derive(Debug)]
-struct GpuProcess {
-    pid: u32,
-    used_memory: u64,
-    name: String,
-}
-
 pub fn run(
     nvml: nvml_wrapper::Nvml,
     delay: Duration,
     lh: &LoggingHandle,
+    hook_pid: Option<u32>,
 ) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
@@ -59,8 +53,8 @@ pub fn run(
     let mut sort_reverse: bool = true;
 
     // State for process selection
-    let mut selected_process_pid: Option<u32> = None;
-    let mut process_selection_enabled: bool = false;
+    let mut selected_process_pid: Option<u32> = hook_pid;
+    let mut process_selection_enabled: bool = hook_pid.is_some();
     let mut highlighted_process_index: usize = 0;
 
     lh.debug(&format!("GPU has fans = {}", have_fans));
@@ -466,34 +460,43 @@ fn draw_misc_with_processes<'d>(
     ));
 
     let content = match get_gpu_processes(gpu) {
-        Ok(mut processes) => {
-            if processes.is_empty() {
-                format!("{}\n\nNo processes running", gpu.misc)
-            } else {
-                // Filter and rank processes based on search term if provided
-                if !search_term.is_empty() {
-                    // Create pairs of (process, score) and filter by positive scores
-                    let mut scored_processes: Vec<(GpuProcess, i32)> = Vec::new();
+        Ok(raw_processes) => {
+            let mut processes = if let Some(isolated_pid) = selected_process_pid {
+                raw_processes.into_iter().filter(|p| p.pid == isolated_pid).collect()
+            } else if !search_term.is_empty() {
+                // Create pairs of (process, score) and filter by positive scores
+                let mut scored_processes: Vec<(GpuProcess, i32)> = Vec::new();
 
-                    for proc in processes {
-                        let name_score = fuzzy_score(&proc.name, search_term);
-                        let pid_score = fuzzy_score(&proc.pid.to_string(), search_term);
+                for proc in raw_processes {
+                    let name_score = fuzzy_score(&proc.name, search_term);
+                    let pid_score = fuzzy_score(&proc.pid.to_string(), search_term);
 
-                        // Use the higher of the two scores
-                        let max_score = name_score.max(pid_score);
+                    // Use the higher of the two scores
+                    let max_score = name_score.max(pid_score);
 
-                        if max_score > 0 {
-                            scored_processes.push((proc, max_score));
-                        }
+                    if max_score > 0 {
+                        scored_processes.push((proc, max_score));
                     }
+                }
 
-                    // Sort by score (descending) - highest scores first
-                    scored_processes.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
+                // Sort by score (descending) - highest scores first
+                scored_processes.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
 
-                    // Extract just the processes in ranked order
-                    processes = scored_processes.into_iter().map(|(proc, _)| proc).collect();
+                // Extract just the processes in ranked order
+                scored_processes.into_iter().map(|(proc, _)| proc).collect()
+            } else {
+                raw_processes
+            };
+
+            if processes.is_empty() {
+                if selected_process_pid.is_some() {
+                    format!("{}\n\nTarget PID {} not found", gpu.misc, selected_process_pid.unwrap())
                 } else {
-                    // Sort by selected column when not searching
+                    format!("{}\n\nNo processes running", gpu.misc)
+                }
+            } else {
+                if search_term.is_empty() && selected_process_pid.is_none() {
+                    // Sort by selected column when not searching/profiling a specific PID
                     match sort_by {
                         ProcessSortBy::Memory => {
                             if sort_reverse {
@@ -535,18 +538,16 @@ fn draw_misc_with_processes<'d>(
                     for (idx, proc) in processes.iter().take(40).enumerate() {
                         let memory_mb = proc.used_memory / 1024 / 1024;
 
-                        // Determine process type (this is a simplified approach)
-                        let process_type = if proc.name.contains("comp")
-                            || proc.name.contains("cuda")
-                            || proc.name.contains("nvidia")
-                        {
-                            "C" // Compute
-                        } else {
-                            "G" // Graphics
-                        };
+                        // Determine process type
+                        let process_type = if proc.is_compute { "C" } else { "G" };
 
                         // Row prefix for display
                         let row_prefix = "  "; // Using spaces for appearance
+
+                        let mut name_truncated = proc.name.clone();
+                        if name_truncated.chars().count() > 38 {
+                            name_truncated = name_truncated.chars().take(35).collect::<String>() + "...";
+                        }
 
                         // Highlight the currently selected/highlighted process
                         //BUG: this doesn't work...
@@ -554,17 +555,17 @@ fn draw_misc_with_processes<'d>(
                         {
                             format!(
                                 "> {:<38} {:>15} {:>13} MB  {}\n",
-                                proc.name, proc.pid, memory_mb, process_type
+                                name_truncated, proc.pid, memory_mb, process_type
                             )
                         } else if selected_process_pid == Some(proc.pid) {
                             format!(
                                 "* {:<38} {:>15} {:>13} MB  {}\n",
-                                proc.name, proc.pid, memory_mb, process_type
+                                name_truncated, proc.pid, memory_mb, process_type
                             )
                         } else {
                             format!(
                                 "{}{:<38} {:>15} {:>13} MB  {}\n",
-                                row_prefix, proc.name, proc.pid, memory_mb, process_type
+                                row_prefix, name_truncated, proc.pid, memory_mb, process_type
                             )
                         };
 
@@ -696,63 +697,4 @@ fn fuzzy_score(text: &str, pattern: &str) -> i32 {
     }
 
     score
-}
-
-fn get_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Result<Vec<GpuProcess>, NvmlError> {
-    let mut gpu_processes = Vec::new();
-
-    if let Ok(compute_processes) = gpu.inner.running_compute_processes() {
-        for process in compute_processes {
-            let name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
-                Ok(name) => name.trim().to_string(),
-                Err(_) => format!("Process-{}", process.pid),
-            };
-
-            let memory_value = extract_memory_value(process.used_gpu_memory);
-
-            gpu_processes.push(GpuProcess {
-                pid: process.pid,
-                used_memory: memory_value,
-                name,
-            });
-        }
-    }
-
-    if let Ok(graphics_processes) = gpu.inner.running_graphics_processes() {
-        for process in graphics_processes {
-            if !gpu_processes.iter().any(|p| p.pid == process.pid) {
-                let name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
-                    Ok(name) => name.trim().to_string(),
-                    Err(_) => format!("Process-{}", process.pid),
-                };
-
-                let memory_value = extract_memory_value(process.used_gpu_memory);
-
-                gpu_processes.push(GpuProcess {
-                    pid: process.pid,
-                    used_memory: memory_value,
-                    name,
-                });
-            }
-        }
-    }
-
-    Ok(gpu_processes)
-}
-
-fn extract_memory_value(used_memory: nvml_wrapper::enums::device::UsedGpuMemory) -> u64 {
-    let s = format!("{:?}", used_memory);
-
-    if let Some(start) = s.find('(')
-        && let Some(end) = s.find(')')
-        && start < end
-    {
-        let num_str = &s[start + 1..end];
-        return num_str.parse::<u64>().unwrap_or(0);
-    }
-    s.chars()
-        .filter(|c| c.is_ascii_digit())
-        .collect::<String>()
-        .parse::<u64>()
-        .unwrap_or(0)
 }
