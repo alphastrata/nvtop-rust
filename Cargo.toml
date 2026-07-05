@@ -25,3 +25,6 @@ nvml-wrapper = "0.11.0"
 ratatui = "0.30.0"
 skim = "0.10.4"
 thiserror = "2.0.18"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hayaku = { path = "../hayaku/hayaku" }
