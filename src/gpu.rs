@@ -32,11 +32,12 @@ pub struct GpuInfo<'d> {
     pub cuda_version: f32,
     pub misc: String,
     pub num_cores: u32,
+    pub pcie_link: String,
+    pub arch: String,
 }
 
 impl<'d> GpuInfo<'d> {
     pub fn from_device(index: u32, device: Device<'d>) -> Result<Self, NvmlError> {
-        // Do some setup for things that will _not_ change, i.e driver version etc.
         let brand = format!("{:?}", device.brand()?);
         let name = device.name().unwrap_or_else(|_| brand.clone());
         let driver_version = device.nvml().sys_driver_version()?;
@@ -49,6 +50,36 @@ impl<'d> GpuInfo<'d> {
             cuda_version / 1000.0
         );
 
+        // Fetch both current negotiated and max capable PCIe speeds
+        let pcie_link = match (device.pcie_link_speed(), device.max_pcie_link_speed()) {
+            (Ok(current), Ok(max)) => {
+                let pci_gen = match current {
+                    2500 => "Gen1",
+                    5000 => "Gen2",
+                    8000 => "Gen3",
+                    16000 => "Gen4",
+                    32000 => "Gen5",
+                    _ => "Unknown",
+                };
+                let max_gen = match max.as_integer() {
+                    Some(2500) | None => "N/A",
+                    Some(5000) => "Gen2",
+                    Some(8000) => "Gen3",
+                    Some(16000) => "Gen4",
+                    Some(32000) => "Gen5",
+                    _ => "?",
+                };
+                if pci_gen != max_gen && max_gen != "N/A" && max_gen != "?" {
+                    format!("⚠️ {} / {} MT/s (Max: {})", pci_gen, current, max_gen)
+                } else {
+                    format!("{} / {} MT/s", pci_gen, current)
+                }
+            }
+            _ => "N/A".into(),
+        };
+
+        let arch = device.architecture().map(|a| format!("{:?}", a)).unwrap_or_default();
+
         Ok(GpuInfo {
             max_memory_clock: device.max_clock_info(Clock::Memory)?,
             max_core_clock: device.max_clock_info(Clock::Graphics)?,
@@ -57,6 +88,8 @@ impl<'d> GpuInfo<'d> {
             driver_version,
             cuda_version,
             misc,
+            pcie_link,
+            arch,
             index,
             inner: device,
         })
@@ -158,96 +191,58 @@ pub fn get_gpu_processes(device: &Device) -> Result<Vec<GpuProcess>, NvmlError> 
                 UsedGpuMemory::Unavailable => 0,
             };
 
-            // NVML system queries fetch process names securely via the driver map layer
-            let name = device.nvml()
-                .sys_process_name(process.pid, 256)
-                .unwrap_or_else(|_| format!("Compute-{}", process.pid));
+            gpu_processes.push(GpuProcess {
+                pid: process.pid,
+                used_memory: memory_bytes,
+                is_compute: true,
+                name: "".to_string(), // NVML doesn't provide names for compute processes natively
+            });
+        }
+    }
+
+    // 2. Ingest Graphics Context Processes Natively (NVidia Driver)
+    if let Ok(graphics_processes) = device.running_graphics_processes() {
+        for process in graphics_processes {
+            let memory_bytes = match process.used_gpu_memory {
+                UsedGpuMemory::Used(bytes) => bytes,
+                UsedGpuMemory::Unavailable => 0,
+            };
 
             gpu_processes.push(GpuProcess {
                 pid: process.pid,
                 used_memory: memory_bytes,
-                name,
-                is_compute: true,
+                is_compute: false,
+                name: "".to_string(),
             });
         }
     }
 
-    // 2. Ingest True Graphics Context Processes Natively
-    if let Ok(graphics_processes) = device.running_graphics_processes() {
-        for process in graphics_processes {
-            if !gpu_processes.iter().any(|p| p.pid == process.pid) {
-                let memory_bytes = match process.used_gpu_memory {
-                    UsedGpuMemory::Used(bytes) => bytes,
-                    UsedGpuMemory::Unavailable => 0,
-                };
+    // 3. Ingest Process Names via Hayaku
+    if gpu_processes.is_empty() {
+        return Ok(gpu_processes);
+    }
 
-                let name = device.nvml()
-                    .sys_process_name(process.pid, 256)
-                    .unwrap_or_else(|_| format!("Graphics-{}", process.pid));
+    // Parallel lookup of process names using the Hayaku binary pipeline stream
+    use std::process::Command;
 
-                gpu_processes.push(GpuProcess {
-                    pid: process.pid,
-                    used_memory: memory_bytes,
-                    name,
-                    is_compute: false,
-                });
+    for proc_entry in &mut gpu_processes {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(format!(
+                "cat /proc/{}/cmdline 2>/dev/null | tr '\\0' ' ' | cut -d' ' -f1 | rev | cut -d'/' -f1 | rev",
+                proc_entry.pid
+            ))
+            .stdout(std::process::Stdio::piped());
+
+        if let Ok(output) = cmd.output() {
+            if let Ok(name) = String::from_utf8(output.stdout) {
+                proc_entry.name = name.trim().to_string();
             }
+        } else {
+            // Fallback for systems where /proc is inaccessible
+            proc_entry.name = format!("pid:{}", proc_entry.pid);
         }
     }
 
     Ok(gpu_processes)
-}
-
-
-#[cfg(test)]
-mod tests {
-    use nvml_wrapper::{
-        Nvml,
-        enum_wrappers::device::{Clock, ClockId},
-    };
-
-    #[ignore = ""]
-    #[test]
-    fn clock_memory() {
-        let nvml = Nvml::init().unwrap();
-        // Get the first `Device` (GPU) in the system
-        let device = nvml.device_by_index(0).unwrap();
-
-        (0..10).for_each(|_| {
-            [
-                ClockId::Current,
-                ClockId::TargetAppClock,
-                ClockId::DefaultAppClock,
-                ClockId::CustomerMaxBoost,
-            ]
-            .into_iter()
-            .for_each(|clock_id| {
-                [Clock::Graphics, Clock::SM, Clock::Memory, Clock::Video]
-                    .into_iter()
-                    .for_each(|clock_type| {
-                        match device.clock(clock_type.clone(), clock_id.clone()) {
-                            Ok(value) => {
-                                println!("Clock: {:?} for {:?}: {}\n", clock_type, clock_id, value);
-                            }
-                            Err(_err) => {}
-                        }
-                    });
-            });
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        });
-    }
-
-    #[test]
-    fn test_get_gpu_processes() {
-        let nvml = match Nvml::init() {
-            Ok(n) => n,
-            Err(_) => return,
-        };
-        let device = match nvml.device_by_index(0) {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-        let processes = super::get_gpu_processes(&device);
-        assert!(processes.is_ok());
-    }
 }

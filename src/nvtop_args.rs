@@ -1,26 +1,27 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use argh::FromArgs;
 
-#[derive(Parser)]
+#[derive(FromArgs)]
+/// Command line arguments for nvtop.
 pub struct Cli {
-    /// Amount of time to wait in millis between updates.
-    #[clap(short, long, value_name = "MILLISECONDS", default_value_t = 100)]
+    /// amount of time to wait in millis between updates.
+    #[argh(option, short = 'd', default = "100")]
     pub delay: u64,
 
-    /// Enable logging to DISK, requires a path.
-    #[clap(long, value_name = "PATH")]
+    /// enable logging to DISK, requires a path.
+    #[argh(option, short = 'l')]
     pub log: Option<PathBuf>,
 
-    /// Run as a background daemon streaming machine-readable JSONL tokens.
-    #[clap(short = 'D', long)]
+    /// run as a background daemon streaming machine-readable JSONL tokens.
+    #[argh(switch)]
     pub daemon: bool,
 
-    /// Pipe destination path for the hayaku messaging stream layer.
-    #[clap(short, long, value_name = "PIPE_PATH", default_value_t = String::from("target/ptx/telemetry.stream"))]
+    /// pipe destination path for the hayagaku messaging stream layer.
+    #[argh(option, default = "\"target/ptx/telemetry.stream\".to_string()")]
     pub output: String,
 
-    /// Specific application PID context target to hook and profile exclusively.
-    #[clap(long, value_name = "TARGET_PID")]
+    /// specific application PID context target to hook and profile exclusively.
+    #[argh(option)]
     pub hook_pid: Option<u32>,
 }
