@@ -24,4 +24,8 @@ pub struct Cli {
     /// specific application PID context target to hook and profile exclusively.
     #[argh(option)]
     pub hook_pid: Option<u32>,
+
+    /// maximum file stream size in MiB before older lines are dropped.
+    #[argh(option, default = "1")]
+    pub stream_cap_mb: u64,
 }

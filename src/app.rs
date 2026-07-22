@@ -202,18 +202,39 @@ pub fn run(
                 }
                 ActiveTab::Master => {
                     // Single GPU: Master == Gpu(0), just render normally
-                    draw_single_gpu_view(f, mid_area, &gpu_list[0], have_fans,
-                        &fuzzy_search_input, &sort_by, sort_reverse,
-                        process_selection_enabled, highlighted_process_index,
-
-                        selected_process_pid, show_process_view);
+                    draw_single_gpu_view(
+                        f,
+                        mid_area,
+                        &gpu_list[0],
+                        SingleGpuViewState {
+                            have_fans,
+                            search_input: &fuzzy_search_input,
+                            sort_by: &sort_by,
+                            sort_reverse,
+                            process_selection_enabled,
+                            highlighted_process_index,
+                            selected_process_pid,
+                            _show_process_view: show_process_view,
+                        },
+                    );
                 }
                 ActiveTab::Gpu(idx) => {
                     if idx < gpu_list.len() {
-                        draw_single_gpu_view(f, mid_area, &gpu_list[idx], have_fans,
-                            &fuzzy_search_input, &sort_by, sort_reverse,
-                            process_selection_enabled, highlighted_process_index,
-                            selected_process_pid, show_process_view);
+                        draw_single_gpu_view(
+                            f,
+                            mid_area,
+                            &gpu_list[idx],
+                            SingleGpuViewState {
+                                have_fans,
+                                search_input: &fuzzy_search_input,
+                                sort_by: &sort_by,
+                                sort_reverse,
+                                process_selection_enabled,
+                                highlighted_process_index,
+                                selected_process_pid,
+                                _show_process_view: show_process_view,
+                            },
+                        );
                     }
                 }
             }
@@ -544,18 +565,22 @@ fn draw_gpu_row(f: &mut Frame<'_>, area: Rect, gpu: &GpuInfo<'_>, have_fans: boo
 }
 
 /// Render the full single-GPU view (existing layout).
-fn draw_single_gpu_view(
-    f: &mut Frame<'_>,
-    mid_area: Rect,
-    gpu: &GpuInfo<'_>,
+struct SingleGpuViewState<'a> {
     have_fans: bool,
-    fuzzy_search_input: &str,
-    sort_by: &ProcessSortBy,
+    search_input: &'a str,
+    sort_by: &'a ProcessSortBy,
     sort_reverse: bool,
     process_selection_enabled: bool,
     highlighted_process_index: usize,
     selected_process_pid: Option<u32>,
     _show_process_view: bool,
+}
+
+fn draw_single_gpu_view(
+    f: &mut Frame<'_>,
+    mid_area: Rect,
+    gpu: &GpuInfo<'_>,
+    state: SingleGpuViewState<'_>,
 ) {
     let block = Block::default()
         .title("NVTOP")
@@ -605,19 +630,19 @@ fn draw_single_gpu_view(
 
     f.render_widget(draw_memory_usage(gpu), right_middle[0]);
     f.render_widget(draw_gpu_die_temp(gpu), right_middle[1]);
-    if have_fans {
+    if state.have_fans {
         f.render_widget(draw_fan_speed(gpu), right_middle[2]);
     }
 
     // Bottom: processes
     let process_widget = draw_misc_with_processes(
         gpu,
-        fuzzy_search_input,
-        sort_by,
-        sort_reverse,
-        process_selection_enabled,
-        highlighted_process_index,
-        selected_process_pid,
+        state.search_input,
+        state.sort_by,
+        state.sort_reverse,
+        state.process_selection_enabled,
+        state.highlighted_process_index,
+        state.selected_process_pid,
     );
     f.render_widget(process_widget, main_layout[2]);
 }
@@ -775,12 +800,8 @@ fn draw_misc_with_processes<'d>(
             };
 
             if processes.is_empty() {
-                if selected_process_pid.is_some() {
-                    format!(
-                        "{}\n\nTarget PID {} not found",
-                        gpu.misc,
-                        selected_process_pid.unwrap()
-                    )
+                if let Some(pid) = selected_process_pid {
+                    format!("{}\n\nTarget PID {} not found", gpu.misc, pid)
                 } else {
                     format!("{}\n\nNo processes running", gpu.misc)
                 }

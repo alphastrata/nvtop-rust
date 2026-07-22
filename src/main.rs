@@ -24,6 +24,7 @@ fn main() -> Result<(), NvTopError> {
             &cli_args.output,
             cli_args.hook_pid,
             &lh,
+            cli_args.stream_cap_mb,
         )?;
     } else if let Err(e) = run(
         nvml,

@@ -38,6 +38,25 @@ pub struct TelemetryExportPacket {
     pub gpc_rx_per_sec_mbps: f32,
 }
 
+fn trim_stream_file(path: &str, cap_bytes: u64) -> io::Result<()> {
+    let content = std::fs::read_to_string(path)?;
+    if content.len() as u64 <= cap_bytes {
+        return Ok(());
+    }
+    let target = (cap_bytes / 2) as usize;
+    let mut kept = 0usize;
+    let mut start = content.len();
+    for line in content.split_inclusive('\n').rev() {
+        let len = line.len();
+        if kept + len > target && kept > 0 {
+            break;
+        }
+        kept += len;
+        start -= len;
+    }
+    std::fs::write(path, &content[start..])
+}
+
 fn is_tcp_mode(output_path: &str) -> bool {
     output_path.starts_with("tcp://") || output_path.contains(':')
 }
@@ -48,7 +67,9 @@ pub fn execute_streaming_daemon(
     output_path: &str,
     target_pid: Option<u32>,
     _lh: &LoggingHandle,
+    stream_cap_mb: u64,
 ) -> Result<(), NvTopError> {
+    let stream_cap_bytes = stream_cap_mb.saturating_mul(1024 * 1024);
     let device = &nvml.device_by_index(0)?;
 
     let bus_type = device
@@ -107,7 +128,7 @@ pub fn execute_streaming_daemon(
             .create(true)
             .append(true)
             .open(output_path)
-            .map_err(|e| io::Error::other(e))?;
+            .map_err(io::Error::other)?;
 
         loop {
             let packet = build_packet(
@@ -120,12 +141,23 @@ pub fn execute_streaming_daemon(
                 target_pid,
             )?;
             let json_line = serde_json::to_string(&packet)
-                .map_err(|e| io::Error::other(e))?
+                .map_err(io::Error::other)?
                 + "\n";
 
             fh.write_all(json_line.as_bytes())?;
             fh.flush()?;
 
+
+            if stream_cap_bytes > 0 && fh.metadata()?.len() > stream_cap_bytes {
+                let path = output_path.to_string();
+                drop(fh);
+                trim_stream_file(&path, stream_cap_bytes)?;
+                fh = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .map_err(io::Error::other)?;
+            }
             std::thread::sleep(interval);
         }
     }
@@ -224,3 +256,26 @@ fn build_packet(
         gpc_rx_per_sec_mbps: 0.0,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn trim_stream_keeps_recent_lines_within_cap() {
+        let path = "/tmp/nvtop_trim_test.stream";
+        let _ = fs::remove_file(path);
+        fs::write(path, "a\nb\nc\nd\ne\nf\n").unwrap();
+        trim_stream_file(path, 4).unwrap();
+        let content = fs::read_to_string(path).unwrap();
+        assert!(
+            content.len() <= 4,
+            "trimmed stream length {} exceeds cap",
+            content.len()
+        );
+        assert!(content.ends_with("f\n"), "stream missing latest line: {content}");
+        let _ = fs::remove_file(path);
+    }
+}
+

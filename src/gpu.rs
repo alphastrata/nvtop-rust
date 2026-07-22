@@ -139,7 +139,7 @@ impl fmt::Display for GpuInfo<'_> {
                             .unwrap_or_default()
                     }
                     Err(err) => {
-                        format!(
+                        let _ = format!(
                             "clock_type={:?}\t\tclock_id={:?} {}",
                             clock_type, clock_id, err,
                         );
