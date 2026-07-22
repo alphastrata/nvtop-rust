@@ -25,7 +25,12 @@ fn main() -> Result<(), NvTopError> {
             cli_args.hook_pid,
             &lh,
         )?;
-    } else if let Err(e) = run(nvml, Duration::from_millis(cli_args.delay), &lh, cli_args.hook_pid) {
+    } else if let Err(e) = run(
+        nvml,
+        Duration::from_millis(cli_args.delay),
+        &lh,
+        cli_args.hook_pid,
+    ) {
         lh.error(&format!("app::run() -> {e}"));
     }
 

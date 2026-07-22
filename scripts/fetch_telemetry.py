@@ -10,6 +10,7 @@ Usage:
 
 Author: Jer & Camuward (nvtop-rust)
 """
+
 import argparse
 import json
 import socket
@@ -45,11 +46,15 @@ def fetch_tcp(addr: str, target: int, out_path: str) -> None:
                         f_out.write(json.dumps(data) + "\n")
                     collected += 1
                     if collected % 250 == 0:
-                        print(f"[FETCHER] Accrued {collected}/{target} clean records...")
+                        print(
+                            f"[FETCHER] Accrued {collected}/{target} clean records..."
+                        )
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     pass
+
     except KeyboardInterrupt:
         pass
+
     finally:
         sock.close()
 
@@ -80,7 +85,9 @@ def fetch_file(input_path: str, target: int, out_path: str) -> None:
                         f_out.write(json.dumps(data) + "\n")
                     collected += 1
                     if collected % 250 == 0:
-                        print(f"[FETCHER] Accrued {collected}/{target} clean records...")
+                        print(
+                            f"[FETCHER] Accrued {collected}/{target} clean records..."
+                        )
                 except json.JSONDecodeError:
                     pass
         except KeyboardInterrupt:
@@ -90,18 +97,34 @@ def fetch_file(input_path: str, target: int, out_path: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch and clean telemetry data from nvtop daemon.")
+    parser = argparse.ArgumentParser(
+        description="Fetch and clean telemetry data from nvtop daemon."
+    )
     file_group = parser.add_mutually_exclusive_group(required=True)
-    file_group.add_argument("--input", type=str, help="Raw output file from the daemon (file mode)")
-    file_group.add_argument("--tcp", type=str, help="TCP address to connect to (e.g. 127.0.0.1:9990)")
-    parser.add_argument("--target", type=int, default=1000, help="Number of valid records to collect")
-    parser.add_argument("-o", "--output", type=str, default="telemetry_1k.jsonl", help="Clean JSONL output file")
+    file_group.add_argument(
+        "--input", type=str, help="Raw output file from the daemon (file mode)"
+    )
+    file_group.add_argument(
+        "--tcp", type=str, help="TCP address to connect to (e.g. 127.0.0.1:9990)"
+    )
+    parser.add_argument(
+        "--target", type=int, default=1000, help="Number of valid records to collect"
+    )
+
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default="telemetry_1k.jsonl",
+        help="Clean JSONL output file",
+    )
 
     args = parser.parse_args()
 
     # Clean start: remove existing output
     try:
         import os
+
         os.remove(args.output)
     except FileNotFoundError:
         pass

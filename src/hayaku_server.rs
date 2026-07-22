@@ -20,12 +20,16 @@ pub fn spawn(addr: &str) -> ((), Sender<Vec<u8>>) {
                     if let Err(e) = stream.set_write_timeout(Some(Duration::from_millis(50))) {
                         eprintln!("[HAYAKU] Set write timeout err: {e}");
                     }
-                    clients_broad.lock().unwrap().push(stream.try_clone().expect("Clone failed"));
+                    clients_broad
+                        .lock()
+                        .unwrap()
+                        .push(stream.try_clone().expect("Clone failed"));
                 }
                 Err(e) => {
                     if e.kind() != std::io::ErrorKind::WouldBlock {
                         eprintln!("[HAYAKU] Accept err: {e}");
                     }
+
                     thread::sleep(Duration::from_millis(10));
                 }
             }
@@ -45,6 +49,7 @@ pub fn spawn(addr: &str) -> ((), Sender<Vec<u8>>) {
                     (Ok(()), Ok(())) => idx += 1,
                     _ => {
                         eprintln!("[HAYAKU] Evicting dead client");
+
                         guards.swap_remove(idx);
                     }
                 }

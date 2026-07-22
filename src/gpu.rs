@@ -12,6 +12,7 @@ use nvml_wrapper::{
 };
 
 use crate::{errors::NvTopError, termite::LoggingHandle};
+use std::process::Command;
 
 #[derive(Debug, Clone)]
 pub struct GpuProcess {
@@ -78,7 +79,10 @@ impl<'d> GpuInfo<'d> {
             _ => "N/A".into(),
         };
 
-        let arch = device.architecture().map(|a| format!("{:?}", a)).unwrap_or_default();
+        let arch = device
+            .architecture()
+            .map(|a| format!("{:?}", a))
+            .unwrap_or_default();
 
         Ok(GpuInfo {
             max_memory_clock: device.max_clock_info(Clock::Memory)?,
@@ -135,7 +139,7 @@ impl fmt::Display for GpuInfo<'_> {
                             .unwrap_or_default()
                     }
                     Err(err) => {
-                        let _formatted = format!(
+                        format!(
                             "clock_type={:?}\t\tclock_id={:?} {}",
                             clock_type, clock_id, err,
                         );
@@ -223,7 +227,6 @@ pub fn get_gpu_processes(device: &Device) -> Result<Vec<GpuProcess>, NvmlError> 
     }
 
     // Parallel lookup of process names using the Hayaku binary pipeline stream
-    use std::process::Command;
 
     for proc_entry in &mut gpu_processes {
         let mut cmd = Command::new("sh");

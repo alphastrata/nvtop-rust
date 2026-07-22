@@ -2,8 +2,8 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use nvml_wrapper::enum_wrappers::device::{Clock, ClockId, PcieUtilCounter, TemperatureSensor};
 use nvml_wrapper::Nvml;
+use nvml_wrapper::enum_wrappers::device::{Clock, ClockId, PcieUtilCounter, TemperatureSensor};
 use serde::Serialize;
 
 use crate::errors::NvTopError;
@@ -51,10 +51,21 @@ pub fn execute_streaming_daemon(
 ) -> Result<(), NvTopError> {
     let device = &nvml.device_by_index(0)?;
 
-    let bus_type = device.bus_type().map(|b| format!("{b:?}")).unwrap_or_else(|_| "Unknown".into());
-    let arch = device.architecture().map(|a| format!("{a:?}")).unwrap_or_else(|_| "Unknown".into());
-    let power_src = device.power_source().map(|p| format!("{p:?}")).unwrap_or_else(|_| "Unknown".into());
-    let fw_ver = device.gsp_firmware_version().unwrap_or_else(|_| "N/A".into());
+    let bus_type = device
+        .bus_type()
+        .map(|b| format!("{b:?}"))
+        .unwrap_or_else(|_| "Unknown".into());
+    let arch = device
+        .architecture()
+        .map(|a| format!("{a:?}"))
+        .unwrap_or_else(|_| "Unknown".into());
+    let power_src = device
+        .power_source()
+        .map(|p| format!("{p:?}"))
+        .unwrap_or_else(|_| "Unknown".into());
+    let fw_ver = device
+        .gsp_firmware_version()
+        .unwrap_or_else(|_| "N/A".into());
     let fan_policy = device.fan_control_policy(0).ok().map(|p| format!("{p:?}"));
 
     if is_tcp_mode(output_path) {
@@ -64,10 +75,22 @@ pub fn execute_streaming_daemon(
         let (_, tx) = hayaku_spawn(addr);
 
         loop {
-            let packet = build_packet(&device, &bus_type, &arch, &power_src, &fw_ver, &fan_policy, target_pid)?;
+            let packet = build_packet(
+                device,
+                &bus_type,
+                &arch,
+                &power_src,
+                &fw_ver,
+                &fan_policy,
+                target_pid,
+            )?;
             let json_line = match serde_json::to_string(&packet) {
                 Ok(s) => s + "\n",
-                Err(e) => { eprintln!("[DAEMON] Serde error: {e}"); continue; }
+                Err(e) => {
+                    eprintln!("[DAEMON] Serde error: {e}");
+
+                    continue;
+                }
             };
 
             if tx.send(json_line.into_bytes()).is_err() {
@@ -84,11 +107,21 @@ pub fn execute_streaming_daemon(
             .create(true)
             .append(true)
             .open(output_path)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(|e| io::Error::other(e))?;
 
         loop {
-            let packet = build_packet(&device, &bus_type, &arch, &power_src, &fw_ver, &fan_policy, target_pid)?;
-            let json_line = serde_json::to_string(&packet).map_err(|e| io::Error::new(io::ErrorKind::Other, e))? + "\n";
+            let packet = build_packet(
+                device,
+                &bus_type,
+                &arch,
+                &power_src,
+                &fw_ver,
+                &fan_policy,
+                target_pid,
+            )?;
+            let json_line = serde_json::to_string(&packet)
+                .map_err(|e| io::Error::other(e))?
+                + "\n";
 
             fh.write_all(json_line.as_bytes())?;
             fh.flush()?;
@@ -109,38 +142,61 @@ fn build_packet(
     fan_policy: &Option<String>,
     target_pid: Option<u32>,
 ) -> Result<TelemetryExportPacket, io::Error> {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
 
-    let (util_gpu, util_mem) = device.utilization_rates().map(|u| (u.gpu, u.memory)).unwrap_or((0, 0));
-    let (mem_total, mem_used) = device.memory_info().map(|m| (m.total, m.used)).unwrap_or((0, 0));
+    let (util_gpu, util_mem) = device
+        .utilization_rates()
+        .map(|u| (u.gpu, u.memory))
+        .unwrap_or((0, 0));
+    let (mem_total, mem_used) = device
+        .memory_info()
+        .map(|m| (m.total, m.used))
+        .unwrap_or((0, 0));
     let sm_clk = device.clock(Clock::SM, ClockId::Current).unwrap_or(0);
     let gr_clk = device.clock(Clock::Graphics, ClockId::Current).unwrap_or(0);
     let mem_clk = device.clock(Clock::Memory, ClockId::Current).unwrap_or(0);
     let temp = device.temperature(TemperatureSensor::Gpu).unwrap_or(0);
     let power_mw = device.power_usage().unwrap_or(0);
 
-    let (pcie_current_mbps, pcie_max_enum) = match (device.pcie_link_speed(), device.max_pcie_link_speed()) {
-        (Ok(cur), Ok(max)) => {
-            if cur == 0 || max.as_integer().unwrap_or(0) == 0 {
-                (0, "N/A".to_string())
-            } else {
-                (cur, format!("{max:?}"))
+    let (pcie_current_mbps, pcie_max_enum) =
+        match (device.pcie_link_speed(), device.max_pcie_link_speed()) {
+            (Ok(cur), Ok(max)) => {
+                if cur == 0 || max.as_integer().unwrap_or(0) == 0 {
+                    (0, "N/A".to_string())
+                } else {
+                    (cur, format!("{max:?}"))
+                }
             }
-        }
-        _ => (0, "Unavailable".into()),
-    };
+            _ => (0, "Unavailable".into()),
+        };
 
-    let (tx_bytes, rx_bytes) = match (device.pcie_throughput(PcieUtilCounter::Send), device.pcie_throughput(PcieUtilCounter::Receive)) {
-        (Ok(tx), Ok(rx)) => ((tx as u64).saturating_mul(1024), (rx as u64).saturating_mul(1024)),
+    let (tx_bytes, rx_bytes) = match (
+        device.pcie_throughput(PcieUtilCounter::Send),
+        device.pcie_throughput(PcieUtilCounter::Receive),
+    ) {
+        (Ok(tx), Ok(rx)) => (
+            (tx as u64).saturating_mul(1024),
+            (rx as u64).saturating_mul(1024),
+        ),
         _ => (0, 0),
     };
 
-    let _target_alloc = if let Some(pid) = target_pid {
+    if let Some(pid) = target_pid {
         get_gpu_processes(device)
             .ok()
-            .and_then(|procs| procs.into_iter().find(|p| p.pid == pid).map(|p| p.used_memory))
+            .and_then(|procs| {
+                procs
+                    .into_iter()
+                    .find(|p| p.pid == pid)
+                    .map(|p| p.used_memory)
+            })
             .unwrap_or(0)
-    } else { 0 };
+    } else {
+        0
+    };
 
     Ok(TelemetryExportPacket {
         timestamp_ms: now,
