@@ -117,6 +117,23 @@ sudo install -Dm755 target/release/nvtop /usr/local/bin/nvtop
 
 Now, you can use `nvtop` from anywhere in your terminal.
 
+### Headless Daemon Mode
+
+Stream JSONL telemetry to a file or TCP socket without the TUI:
+
+```bash
+# Stream to a file, cap it at 1 MiB by default
+nvtop --daemon --output /tmp/nvtop.stream
+
+# Stream to a TCP socket
+nvtop --daemon --output tcp://127.0.0.1:9990
+
+# Custom poll interval and stream cap (in MiB)
+nvtop --daemon --output /tmp/nvtop.stream --delay 500 --stream-cap-mb 5
+```
+
+Each line is a JSON packet for one GPU. Multi-GPU consumers should run one daemon per GPU or disambiguate packets by the emitting instance. The file stream is bounded by `--stream-cap-mb`; older lines are dropped when the cap is exceeded.
+
 ______________________________________________________________________
 
 # Why?

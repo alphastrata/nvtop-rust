@@ -1,17 +1,31 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use argh::FromArgs;
 
-#[derive(Parser)]
+#[derive(FromArgs)]
+/// Command line arguments for nvtop.
 pub struct Cli {
-    /// Amount of time to wait in millis.
-    /// nvtop --delay 1000  # to run with a delay of 1s.
-    /// nvtop -d 200        # short flags are supported.
-    #[clap(short, long, value_name = "MILLISECONDS", default_value_t = 100)]
+    /// amount of time to wait in millis between updates.
+    #[argh(option, short = 'd', default = "100")]
     pub delay: u64,
 
-    /// Enable logging to DISK, disabled by default, requires a path that you want to log to, i.e:
-    /// `nvtop --log ~/Documents/nvtop.log`
-    #[clap(long, value_name = "Enable Logging")]
+    /// enable logging to DISK, requires a path.
+    #[argh(option, short = 'l')]
     pub log: Option<PathBuf>,
+
+    /// run as a background daemon streaming machine-readable JSONL tokens.
+    #[argh(switch)]
+    pub daemon: bool,
+
+    /// pipe destination path for the hayagaku messaging stream layer.
+    #[argh(option, default = "\"target/ptx/telemetry.stream\".to_string()")]
+    pub output: String,
+
+    /// specific application PID context target to hook and profile exclusively.
+    #[argh(option)]
+    pub hook_pid: Option<u32>,
+
+    /// maximum file stream size in MiB before older lines are dropped.
+    #[argh(option, default = "1")]
+    pub stream_cap_mb: u64,
 }

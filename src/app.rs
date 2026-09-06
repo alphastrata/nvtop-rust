@@ -16,7 +16,11 @@ use std::time::Duration;
 use crate::errors::NvTopError;
 use crate::stylers::calculate_severity;
 use crate::termite::LoggingHandle;
-use crate::{errors, gpu::GpuInfo};
+use crate::{
+    errors,
+    gpu::{GpuInfo, GpuProcess, get_gpu_processes},
+};
+use crossterm::event::KeyCode;
 
 #[derive(Clone, PartialEq)]
 enum ProcessSortBy {
@@ -25,17 +29,65 @@ enum ProcessSortBy {
     Pid,
 }
 
-#[derive(Debug)]
-struct GpuProcess {
-    pid: u32,
-    used_memory: u64,
-    name: String,
+/// Which tab is active: the Master overview or a single GPU.
+#[derive(Clone, Copy, PartialEq)]
+enum ActiveTab {
+    Master,
+    Gpu(usize),
+}
+
+impl ActiveTab {
+    fn next(self, count: usize) -> Self {
+        match self {
+            ActiveTab::Master => {
+                if count > 0 {
+                    ActiveTab::Gpu(0)
+                } else {
+                    ActiveTab::Master
+                }
+            }
+            ActiveTab::Gpu(i) => {
+                if i + 1 < count {
+                    ActiveTab::Gpu(i + 1)
+                } else {
+                    ActiveTab::Master
+                }
+            }
+        }
+    }
+
+    fn prev(self, count: usize) -> Self {
+        match self {
+            ActiveTab::Master => {
+                if count > 0 {
+                    ActiveTab::Gpu(count - 1)
+                } else {
+                    ActiveTab::Master
+                }
+            }
+            ActiveTab::Gpu(i) => {
+                if i > 0 {
+                    ActiveTab::Gpu(i - 1)
+                } else {
+                    ActiveTab::Master
+                }
+            }
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            ActiveTab::Master => 0,
+            ActiveTab::Gpu(i) => i + 1,
+        }
+    }
 }
 
 pub fn run(
     nvml: nvml_wrapper::Nvml,
     delay: Duration,
     lh: &LoggingHandle,
+    hook_pid: Option<u32>,
 ) -> anyhow::Result<(), errors::NvTopError> {
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
@@ -45,10 +97,11 @@ pub fn run(
 
     let mut gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
 
-    let mut selected_gpu: usize = 0;
+    let mut active_tab: ActiveTab = ActiveTab::Gpu(0);
+
     let mut have_fans: bool = gpu_list
         .iter()
-        .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
+        .any(|gpu| gpu.inner.num_fans().unwrap_or(0) != 0);
 
     // State variables for process view
     let mut show_process_view: bool = true;
@@ -59,18 +112,17 @@ pub fn run(
     let mut sort_reverse: bool = true;
 
     // State for process selection
-    let mut selected_process_pid: Option<u32> = None;
-    let mut process_selection_enabled: bool = false;
+    let mut selected_process_pid: Option<u32> = hook_pid;
+    let mut process_selection_enabled: bool = hook_pid.is_some();
     let mut highlighted_process_index: usize = 0;
 
     lh.debug(&format!("GPU has fans = {}", have_fans));
 
     loop {
         _ = terminal.draw(|f| {
-            let gpu = &gpu_list[selected_gpu];
+            let multi = gpu_list.len() > 1;
 
-            // draw tab bar if more than one device is connected
-            let mid_area = if gpu_list.len() == 1 {
+            let mid_area = if !multi {
                 let layout = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Min(0), Constraint::Length(1)])
@@ -107,118 +159,89 @@ pub fn run(
                     ])
                     .split(f.area());
 
+                // Tab bar: Master + per-GPU tabs
+                let tab_titles: Vec<String> = std::iter::once("Master".to_string())
+                    .chain(gpu_list.iter().map(|gpu| format!("[{}] {}", gpu.index, gpu.name)))
+                    .collect();
+
                 f.render_widget(
-                    Tabs::new(
-                        gpu_list
-                            .iter()
-                            .map(|gpu| format!("[{}] {}", gpu.index, gpu.card_type))
-                            .collect::<Vec<_>>(),
-                    )
-                    .select(selected_gpu)
-                    .style(Style::default().fg(Color::Green))
-                    .highlight_style(Style::default().fg(Color::Green).bold())
-                    .divider(DOT),
+                    Tabs::new(tab_titles)
+                        .select(active_tab.index())
+                        .style(Style::default().fg(Color::Green))
+                        .highlight_style(Style::default().fg(Color::Cyan).bold().underlined())
+                        .divider(DOT),
                     layout[0],
                 );
 
-                // Render the main footer text
-                f.render_widget(
-                    if show_process_view {
-                        if process_selection_enabled {
-                            Paragraph::new("q to quit, ESC to return to stats, f or / to search, s to sort, r to reverse, UP/DOWN to navigate, SPACE to select, p to exit".to_string())
+                // Footer
+                let footer = match active_tab {
+                    ActiveTab::Master => {
+                        Paragraph::new("q to quit, ←/→ or Tab to switch tabs, p to rescan devices")
+                    }
+                    ActiveTab::Gpu(_) => {
+                        if show_process_view {
+                            if process_selection_enabled {
+                                Paragraph::new("q to quit, ←/→ or Tab to switch GPUs, ESC to return to stats, f or / to search, s to sort, r to reverse, ↑/↓ to navigate, SPACE to select, p to exit")
+                            } else {
+                                Paragraph::new("q to quit, ←/→ or Tab to switch GPUs, ESC to return to stats, f or / to search, s to sort, r to reverse, p to select process")
+                            }
                         } else {
-                            Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices, ESC to return to stats, f or / to search, s to sort, r to reverse, p to select process".to_string())
+                            Paragraph::new("q to quit, ←/→ or Tab to switch GPUs, f or / to show processes")
                         }
-                    } else {
-                        Paragraph::new("q to quit, p to rescan devices, fn keys to switch devices, f or / to show processes".to_string())
-                    },
-                    layout[2],
-                );
+                    }
+
+                };
+                f.render_widget(footer, layout[2]);
 
                 layout[1]
             };
 
-            // Outermost Block, which draws the green border around the whole UI.
-            let block = Block::default()
-                .title("NVTOP")
-                .title_top(Line::from("NVTOP"))
-                .title_alignment(Alignment::Center)
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green))
-                .border_type(BorderType::Rounded)
-                .style(Style::default());
-            f.render_widget(block, mid_area);
-
-            let main_layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Percentage(50),
-                    Constraint::Percentage(45),
-                ])
-                .margin(1)
-                .split(f.area());
-
-            // Top section: Card info (single line)
-            let top_chunk = main_layout[0];
-            let card_info_widget = draw_driver_info(gpu);
-            f.render_widget(card_info_widget, top_chunk);
-
-            // Middle section: Metrics (core util, temp, memory, etc.)
-            let middle_area = main_layout[1];
-            let middle_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(70),
-                    Constraint::Percentage(30),
-                ])
-                .split(middle_area);
-
-            let left_middle = Layout::default()
-                .constraints([
-                    Constraint::Percentage(50), // Core utilisation
-                    Constraint::Percentage(50), // Core Clock
-                ])
-                .split(middle_chunks[0]);
-
-            // Core utilisation
-            let core_gauge = draw_core_utilisation(gpu);
-            f.render_widget(core_gauge, left_middle[0]);
-
-            // Core Clock
-            let core_gauge = draw_core_clock(gpu).unwrap();
-            f.render_widget(core_gauge, left_middle[1]);
-
-            // Right side of middle: Memory, Temp, Fan - adjusted to align with left panels
-            let right_middle = Layout::default()
-                .constraints([
-                    Constraint::Percentage(50), // Memory
-                    Constraint::Percentage(25), // Temp (half height)
-                    Constraint::Percentage(25), // Fan speed (half height)
-                ])
-                .split(middle_chunks[1]);
-
-            // Memory:
-            let mem_usage_gauge = draw_memory_usage(gpu);
-            f.render_widget(mem_usage_gauge, right_middle[0]);
-
-            // Temp:
-            let temp_gauge = draw_gpu_die_temp(gpu);
-            f.render_widget(temp_gauge, right_middle[1]);
-
-            // Fan speed:
-            if have_fans {
-                let gauge = draw_fan_speed(gpu);
-                f.render_widget(gauge, right_middle[2]);
+            match active_tab {
+                ActiveTab::Master if multi => {
+                    draw_master_view(f, mid_area, &gpu_list, have_fans);
+                }
+                ActiveTab::Master => {
+                    // Single GPU: Master == Gpu(0), just render normally
+                    draw_single_gpu_view(
+                        f,
+                        mid_area,
+                        &gpu_list[0],
+                        SingleGpuViewState {
+                            have_fans,
+                            search_input: &fuzzy_search_input,
+                            sort_by: &sort_by,
+                            sort_reverse,
+                            process_selection_enabled,
+                            highlighted_process_index,
+                            selected_process_pid,
+                            _show_process_view: show_process_view,
+                        },
+                    );
+                }
+                ActiveTab::Gpu(idx) => {
+                    if idx < gpu_list.len() {
+                        draw_single_gpu_view(
+                            f,
+                            mid_area,
+                            &gpu_list[idx],
+                            SingleGpuViewState {
+                                have_fans,
+                                search_input: &fuzzy_search_input,
+                                sort_by: &sort_by,
+                                sort_reverse,
+                                process_selection_enabled,
+                                highlighted_process_index,
+                                selected_process_pid,
+                                _show_process_view: show_process_view,
+                            },
+                        );
+                    }
+                }
             }
 
-            // Bottom section: Processes (always shown)
-            let process_widget = draw_misc_with_processes(gpu, &fuzzy_search_input, &sort_by, sort_reverse, process_selection_enabled, highlighted_process_index, selected_process_pid);
-            f.render_widget(process_widget, main_layout[2]);
-
-            // If fuzzy search is active, render a modal-style search box in the Center as an overlay
+            // Fuzzy search overlay
             if fuzzy_search_active {
-                let search_text = format!("{}_", &fuzzy_search_input);
+                let search_text = format!("{}_", fuzzy_search_input);
                 let block = Block::default()
                     .borders(Borders::ALL)
                     .title("🔍... [ESC to cancel]")
@@ -229,32 +252,62 @@ pub fn run(
                     .style(Style::default().bg(Color::Rgb(40, 40, 40)).fg(Color::LightCyan).add_modifier(Modifier::BOLD))
                     .alignment(Alignment::Left);
 
-                // Centre the search box
                 let search_width = 60.min(f.area().width.saturating_sub(2));
                 let search_height = 3;
                 let x = f.area().width / 2 - search_width / 2;
-                let y = f.area().height / 2 - 1; // Vertically..
+                let y = f.area().height / 2 - 1;
 
                 let search_area = Rect::new(x, y, search_width, search_height);
 
-                // Draw a semi-transparent overlay background
-                let overlay = Paragraph::new(" ")
-                    .style(Style::default().bg(Color::Rgb(20, 20, 20))); // Very dark semi-transparent?
-
-                f.render_widget(overlay, f.area());
+                f.render_widget(Clear, search_area);
                 f.render_widget(search_input, search_area);
             }
         })?;
 
         if crossterm::event::poll(std::time::Duration::from_millis(250))?
             && let crossterm::event::Event::Key(key) = crossterm::event::read()?
+            && key.kind == crossterm::event::KeyEventKind::Press
         {
-            use crossterm::event::KeyCode;
+            // Tab navigation (works in all views, but only meaningful when multi-GPU)
+            if gpu_list.len() > 1 {
+                match key.code {
+                    KeyCode::Tab => {
+                        active_tab = active_tab.next(gpu_list.len());
+                        continue;
+                    }
+                    KeyCode::Right => {
+                        if !fuzzy_search_active {
+                            active_tab = active_tab.next(gpu_list.len());
+
+                            continue;
+                        }
+                    }
+                    KeyCode::Left
+                        if !fuzzy_search_active => {
+                            active_tab = active_tab.prev(gpu_list.len());
+                            continue;
+                        }
+                    _ => {}
+                }
+            }
+
+            // In Master view, only handle q and p
+            if active_tab == ActiveTab::Master && gpu_list.len() > 1 {
+                match key.code {
+                    KeyCode::Char('q') => break,
+                    #[cfg(target_os = "linux")]
+                    KeyCode::Char('m') => {
+                        rescan_gpus(&nvml, &mut gpu_list, &mut active_tab, &mut have_fans, lh)?;
+                    }
+                    _ => {}
+                }
+                std::thread::sleep(delay);
+                continue;
+            }
 
             match key.code {
                 KeyCode::Char('q') => break,
                 KeyCode::Esc => {
-                    // Exit fuzzy search if active, otherwise exit process view mode if currently in it
                     if fuzzy_search_active {
                         fuzzy_search_active = false;
                         fuzzy_search_input.clear();
@@ -262,27 +315,22 @@ pub fn run(
                         show_process_view = false;
                     }
                 }
-                KeyCode::Char('f') | KeyCode::Char('/') => {
-                    // Always activate fuzzy search when '/' is pressed
+                KeyCode::Char('f' | '/') if !fuzzy_search_active => {
                     show_process_view = true;
                     fuzzy_search_active = true;
+
                     fuzzy_search_input.clear();
                 }
-                // Handle character input for fuzzy search - but exclude 'f' and '/' which are handled separately
                 KeyCode::Char(c) if fuzzy_search_active => {
                     fuzzy_search_input.push(c);
                 }
-                // Handle backspace in fuzzy search
                 KeyCode::Backspace if fuzzy_search_active => {
                     fuzzy_search_input.pop();
                 }
-                // Handle Enter to exit fuzzy search
                 KeyCode::Enter if fuzzy_search_active => {
                     fuzzy_search_active = false;
                 }
-                // Sorting controls
                 KeyCode::Char('s') => {
-                    // Cycle through sorting options: Memory -> Name -> PID -> Memory...
                     sort_by = match sort_by {
                         ProcessSortBy::Memory => ProcessSortBy::Name,
                         ProcessSortBy::Name => ProcessSortBy::Pid,
@@ -290,20 +338,18 @@ pub fn run(
                     };
                 }
                 KeyCode::Char('r') => {
-                    // Reverse sort order
                     sort_reverse = !sort_reverse;
                 }
-                // Process selection controls
                 KeyCode::Char('p') if show_process_view && !fuzzy_search_active => {
-                    // Toggle process selection mode
                     process_selection_enabled = !process_selection_enabled;
                     if !process_selection_enabled {
                         selected_process_pid = None;
                     }
                 }
                 KeyCode::Char(' ') if process_selection_enabled && show_process_view => {
-                    // Select the currently highlighted process
-                    if let Ok(processes) = get_gpu_processes(&gpu_list[selected_gpu])
+                    if let ActiveTab::Gpu(idx) = active_tab
+                        && idx < gpu_list.len()
+                        && let Ok(processes) = get_gpu_processes(&gpu_list[idx])
                         && highlighted_process_index < processes.len()
                         && let Some(proc) = processes.get(highlighted_process_index)
                     {
@@ -312,53 +358,25 @@ pub fn run(
                     }
                 }
                 KeyCode::Up if process_selection_enabled && show_process_view => {
-                    // Move highlight up
                     highlighted_process_index = highlighted_process_index.saturating_sub(1);
                 }
                 KeyCode::Down if process_selection_enabled && show_process_view => {
-                    // Move highlight down
-                    if let Ok(processes) = get_gpu_processes(&gpu_list[selected_gpu])
+                    if let ActiveTab::Gpu(idx) = active_tab
+                        && idx < gpu_list.len()
+                        && let Ok(processes) = get_gpu_processes(&gpu_list[idx])
                         && highlighted_process_index < processes.len().saturating_sub(1)
                     {
                         highlighted_process_index += 1;
                     }
                 }
-               
                 #[cfg(target_os = "linux")]
                 KeyCode::Char('m') => {
-                    // re-scan pci tree to let driver discover new devices (only works as sudo)
-                    match nvml.discover_gpus(PciInfo {
-                        bus: 0,
-                        bus_id: "".into(),
-                        device: 0,
-                        domain: 0,
-                        pci_device_id: 0,
-                        pci_sub_system_id: Some(0),
-                    }) {
-                        Ok(()) => {
-                            have_fans = gpu_list
-                                .iter()
-                                .any(|gpu| gpu.inner.num_fans().map_or(0, |fc| fc) != 0);
-
-                            lh.debug(&format!("GPU has fans = {}", have_fans));
-                            lh.debug("Re-scanned PCI tree");
-                        }
-                        Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
-                            lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
-                        }
-                        Err(e) => return Err(e.into()),
-                    }
-                    // re-scan for devices
-                    gpu_list = crate::gpu::try_init_gpus(&nvml, lh)?;
-                    if selected_gpu >= gpu_list.len() {
-                        selected_gpu = 0;
-                    }
+                    rescan_gpus(&nvml, &mut gpu_list, &mut active_tab, &mut have_fans, lh)?;
                 }
                 _ => {}
             }
         }
 
-        // primitive rate limiting.
         std::thread::sleep(delay);
     }
 
@@ -368,35 +386,313 @@ pub fn run(
     Ok(())
 }
 
-fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
-    let temps = gpu
+#[cfg(target_os = "linux")]
+fn rescan_gpus<'a>(
+    nvml: &'a nvml_wrapper::Nvml,
+    gpu_list: &mut Vec<GpuInfo<'a>>,
+    active_tab: &mut ActiveTab,
+    have_fans: &mut bool,
+    lh: &LoggingHandle,
+) -> Result<(), NvTopError> {
+    match nvml.discover_gpus(PciInfo {
+        bus: 0,
+        bus_id: "".into(),
+        device: 0,
+        domain: 0,
+        pci_device_id: 0,
+        pci_sub_system_id: Some(0),
+    }) {
+        Ok(()) => {
+            *have_fans = gpu_list
+                .iter()
+                .any(|gpu| gpu.inner.num_fans().unwrap_or(0) != 0);
+
+            lh.debug(&format!("GPU has fans = {}", have_fans));
+            lh.debug("Re-scanned PCI tree");
+        }
+        Err(e @ (NvmlError::OperatingSystem | NvmlError::NoPermission)) => {
+            lh.debug(&format!("Failed to re-scan PCI tree: {e}"));
+        }
+        Err(e) => return Err(e.into()),
+    }
+    *gpu_list = crate::gpu::try_init_gpus(nvml, lh)?;
+    if let ActiveTab::Gpu(i) = *active_tab
+        && i >= gpu_list.len()
+    {
+        *active_tab = ActiveTab::Gpu(0);
+    }
+    Ok(())
+}
+
+/// Render the Master overview: all GPUs' main gauges in a grid, no PID window.
+fn draw_master_view(f: &mut Frame<'_>, area: Rect, gpu_list: &[GpuInfo<'_>], have_fans: bool) {
+    let block = Block::default()
+        .title("NVTOP — Master Overview")
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green))
+        .border_type(BorderType::Rounded);
+    f.render_widget(block, area);
+
+    let inner = area.inner(Margin::new(1, 1));
+    let n = gpu_list.len();
+    if n == 0 {
+        return;
+    }
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(vec![Constraint::Percentage(100 / n as u16); n])
+        .split(inner);
+
+    for (i, gpu) in gpu_list.iter().enumerate() {
+        draw_gpu_row(f, rows[i], gpu, have_fans);
+    }
+}
+
+/// Render a single GPU's key metrics in a compact horizontal strip for the Master view.
+fn draw_gpu_row(f: &mut Frame<'_>, area: Rect, gpu: &GpuInfo<'_>, have_fans: bool) {
+    let cols = if have_fans { 6 } else { 5 };
+    let constraints = vec![Constraint::Percentage(25); cols];
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
+
+    // Col 0: Card info (compact)
+    let compute_cap = match gpu.inner.cuda_compute_capability() {
+        Ok(cap) => format!("{}.{}", cap.major, cap.minor),
+        Err(_) => "N/A".into(),
+    };
+    let card_text = format!(
+        "[{}] {}\nDrv:{} CC:{}\n{}",
+        gpu.index,
+        truncate_str(&compact_name(&gpu.name), 18),
+        gpu.driver_version,
+        compute_cap,
+        gpu.pcie_link,
+    );
+    f.render_widget(
+        Paragraph::new(card_text).block(Block::default().borders(Borders::ALL).title("Card")),
+        chunks[0],
+    );
+
+    // Col 1: Core utilisation
+    let percent = gpu.inner.utilization_rates().map_or(0, |ur| ur.gpu as u16);
+    f.render_widget(
+        Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("Util"))
+            .gauge_style(
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .percent(percent)
+            .label(format!("{}%", percent)),
+        chunks[1],
+    );
+
+    // Col 2: Core clock
+    let clk = gpu
         .inner
-        .num_fans()
-        .expect("This should be impossible as we never call this without having earlier checked.");
-    let avg = (0..temps as usize)
-        .flat_map(|v| gpu.inner.fan_speed(v as u32))
+        .clock(Clock::Graphics, ClockId::Current)
+        .unwrap_or(0);
+    let clk_ratio = (clk as f64 / gpu.max_core_clock as f64).clamp(0.0, 1.0);
+    f.render_widget(
+        Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("Clk"))
+            .gauge_style(calculate_severity(clk_ratio).style_for())
+            .ratio(clk_ratio)
+            .label(format!("{}/{}M", clk, gpu.max_core_clock)),
+        chunks[2],
+    );
+
+    // Col 3: Memory
+    let mem_info = gpu.inner.memory_info().unwrap_or(MemoryInfo {
+        free: 0,
+        total: 0,
+        used: 0,
+        reserved: Default::default(),
+        version: Default::default(),
+    });
+    let mem_used = mem_info.used as f64 / 1_073_741_824.0;
+    let mem_total = mem_info.total as f64 / 1_073_741_824.0;
+
+    let mem_pct = (mem_used / mem_total).clamp(0.0, 1.0);
+    f.render_widget(
+        Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("Mem"))
+            .gauge_style(calculate_severity(mem_pct).style_for())
+            .ratio(mem_pct)
+            .label(format!("{:.1}/{:.1}G", mem_used, mem_total)),
+        chunks[3],
+    );
+
+    // Col 4: Temp
+    let temp = gpu.inner.temperature(TemperatureSensor::Gpu).unwrap_or(0);
+    let temp_ratio = (temp as f64 / 100.0).clamp(0.0, 1.0);
+    f.render_widget(
+        Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("Tmp"))
+            .gauge_style(calculate_severity(temp_ratio).style_for())
+            .ratio(temp_ratio)
+            .label(format!("{}°C", temp)),
+        chunks[4],
+    );
+
+    // Col 5: Fan (if applicable)
+    if have_fans {
+        let nfans = gpu.inner.num_fans().unwrap_or(0);
+        let fan_pct = if nfans > 0 {
+            let avg = (0..nfans as usize)
+                .flat_map(|v| gpu.inner.fan_speed(v as u32))
+                .map(|u| u as f64)
+                .sum::<f64>()
+                / nfans as f64;
+            (avg / 100.0).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        f.render_widget(
+            Gauge::default()
+                .block(Block::default().borders(Borders::ALL).title("Fan"))
+                .gauge_style(calculate_severity(fan_pct).style_for())
+                .ratio(fan_pct)
+                .label(format!("{:.0}%", fan_pct * 100.0)),
+            chunks[5],
+        );
+    }
+}
+
+/// Render the full single-GPU view (existing layout).
+struct SingleGpuViewState<'a> {
+    have_fans: bool,
+    search_input: &'a str,
+    sort_by: &'a ProcessSortBy,
+    sort_reverse: bool,
+    process_selection_enabled: bool,
+    highlighted_process_index: usize,
+    selected_process_pid: Option<u32>,
+    _show_process_view: bool,
+}
+
+fn draw_single_gpu_view(
+    f: &mut Frame<'_>,
+    mid_area: Rect,
+    gpu: &GpuInfo<'_>,
+    state: SingleGpuViewState<'_>,
+) {
+    let block = Block::default()
+        .title("NVTOP")
+        .title_top(Line::from("NVTOP"))
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green))
+        .border_type(BorderType::Rounded)
+        .style(Style::default());
+    f.render_widget(block, mid_area);
+
+    let main_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Percentage(50),
+            Constraint::Percentage(45),
+        ])
+        .margin(1)
+        .split(f.area());
+
+    // Top: Card info
+    let top_chunk = main_layout[0];
+    f.render_widget(draw_driver_info(gpu), top_chunk);
+
+    // Middle: metrics
+    let middle_area = main_layout[1];
+    let middle_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .split(middle_area);
+
+    let left_middle = Layout::default()
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(middle_chunks[0]);
+
+    f.render_widget(draw_core_utilisation(gpu), left_middle[0]);
+    f.render_widget(draw_core_clock(gpu).unwrap(), left_middle[1]);
+
+    let right_middle = Layout::default()
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+        ])
+        .split(middle_chunks[1]);
+
+    f.render_widget(draw_memory_usage(gpu), right_middle[0]);
+    f.render_widget(draw_gpu_die_temp(gpu), right_middle[1]);
+    if state.have_fans {
+        f.render_widget(draw_fan_speed(gpu), right_middle[2]);
+    }
+
+    // Bottom: processes
+    let process_widget = draw_misc_with_processes(
+        gpu,
+        state.search_input,
+        state.sort_by,
+        state.sort_reverse,
+        state.process_selection_enabled,
+        state.highlighted_process_index,
+        state.selected_process_pid,
+    );
+    f.render_widget(process_widget, main_layout[2]);
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max.saturating_sub(3)).collect::<String>() + "..."
+    }
+}
+
+fn compact_name(name: &str) -> String {
+    ["NVIDIA", "GeForce", "RTX", "GTX", "Quadro", "Tesla"]
+        .iter()
+        .fold(name.to_string(), |s, &w| {
+            s.replace(w, "")
+                .replace(&w.to_lowercase(), "")
+                .replace(&w.to_uppercase(), "")
+        })
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn draw_fan_speed<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
+    let fans = gpu.inner.num_fans().unwrap_or(0);
+    if fans == 0 {
+        return Gauge::default();
+    }
+
+    let fan_pct = (0..fans)
+        .filter_map(|v| gpu.inner.fan_speed(v).ok())
         .map(|u| u as f64)
         .sum::<f64>()
-        / temps as f64;
+        / fans as f64
+        / 100.0;
 
-    let percentage = (avg / 100.).clamp(0.0, 1.0);
-
-    let label = format!("{:.1}%", avg);
+    let label = format!("{:.1}%", fan_pct * 100.0);
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
 
     Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Fan Speed"))
-        .gauge_style(calculate_severity(percentage).style_for())
+        .gauge_style(calculate_severity(fan_pct).style_for())
         .label(spanned_label)
-        .style(Style::default())
-        .ratio(percentage)
+        .ratio(fan_pct.clamp(0.0, 1.0))
 }
 
 fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
-    let gpu_die_temperature = gpu
-        .inner
-        .temperature(TemperatureSensor::Gpu)
-        .map_or(0, |temp| temp);
+    let gpu_die_temperature = gpu.inner.temperature(TemperatureSensor::Gpu).unwrap_or(0);
 
     let label = format!("{:.2}°C", gpu_die_temperature);
     let spanned_label = Span::styled(label, Style::new().white().bold().bg(Color::Black));
@@ -411,18 +707,15 @@ fn draw_gpu_die_temp<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
 }
 
 fn draw_memory_usage<'d>(gpu: &GpuInfo<'d>) -> Gauge<'d> {
-    let mem_info = gpu.inner.memory_info().map_or(
-        MemoryInfo {
-            free: 0,
-            total: 0, //TODO: This never changes so put in self
-            used: 0,
-            reserved: Default::default(),
-            version: Default::default(),
-        },
-        |mem_info| mem_info,
-    );
+    let mem_info = gpu.inner.memory_info().unwrap_or(MemoryInfo {
+        free: 0,
+        total: 0,
+        used: 0,
+        reserved: Default::default(),
+        version: Default::default(),
+    });
 
-    let mem_used = mem_info.used as f64 / 1_073_741_824.0; // as GB
+    let mem_used = mem_info.used as f64 / 1_073_741_824.0;
     let mem_total = mem_info.total as f64 / 1_073_741_824.0;
     let mem_percentage = (mem_used / mem_total).clamp(0.0, 1.0);
 
@@ -450,11 +743,13 @@ fn draw_driver_info<'d>(gpu: &GpuInfo<'d>) -> Paragraph<'d> {
     };
 
     let info_text = format!(
-        "Card: {:<15} | Driver: {:<12} | CUDA: {:<8} | Compute Cap: {}",
-        gpu.card_type,
+        "Card: {:<24} | Driver: {:<12} | CUDA: {:<8} | Compute Cap: {} | PCIE: {} | Arch: {}",
+        gpu.name,
         gpu.driver_version,
         gpu.cuda_version / 1000.0,
-        compute_cap
+        compute_cap,
+        gpu.pcie_link,
+        gpu.arch,
     );
 
     Paragraph::new(info_text)
@@ -479,60 +774,64 @@ fn draw_misc_with_processes<'d>(
     ));
 
     let content = match get_gpu_processes(gpu) {
-        Ok(mut processes) => {
-            if processes.is_empty() {
-                format!("{}\n\nNo processes running", gpu.misc)
-            } else {
-                // Filter and rank processes based on search term if provided
-                if !search_term.is_empty() {
-                    // Create pairs of (process, score) and filter by positive scores
-                    let mut scored_processes: Vec<(GpuProcess, i32)> = Vec::new();
+        Ok(raw_processes) => {
+            let mut processes = if let Some(isolated_pid) = selected_process_pid {
+                raw_processes
+                    .into_iter()
+                    .filter(|p| p.pid == isolated_pid)
+                    .collect()
+            } else if !search_term.is_empty() {
+                let mut scored_processes: Vec<(GpuProcess, i32)> = Vec::new();
 
-                    for proc in processes {
-                        let name_score = fuzzy_score(&proc.name, search_term);
-                        let pid_score = fuzzy_score(&proc.pid.to_string(), search_term);
+                for proc in raw_processes {
+                    let name_score = fuzzy_score(&proc.name, search_term);
+                    let pid_score = fuzzy_score(&proc.pid.to_string(), search_term);
+                    let max_score = name_score.max(pid_score);
 
-                        // Use the higher of the two scores
-                        let max_score = name_score.max(pid_score);
-
-                        if max_score > 0 {
-                            scored_processes.push((proc, max_score));
-                        }
+                    if max_score > 0 {
+                        scored_processes.push((proc, max_score));
                     }
+                }
 
-                    // Sort by score (descending) - highest scores first
-                    scored_processes.sort_by(|a, b| b.1.cmp(&a.1));
+                scored_processes.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
+                scored_processes.into_iter().map(|(proc, _)| proc).collect()
+            } else {
+                raw_processes
+            };
 
-                    // Extract just the processes in ranked order
-                    processes = scored_processes.into_iter().map(|(proc, _)| proc).collect();
+            if processes.is_empty() {
+                if let Some(pid) = selected_process_pid {
+                    format!("{}\n\nTarget PID {} not found", gpu.misc, pid)
                 } else {
-                    // Sort by selected column when not searching
+                    format!("{}\n\nNo processes running", gpu.misc)
+                }
+            } else {
+                if search_term.is_empty() && selected_process_pid.is_none() {
                     match sort_by {
                         ProcessSortBy::Memory => {
                             if sort_reverse {
-                                processes.sort_by(|a, b| b.used_memory.cmp(&a.used_memory));
-                            // Descending
+                                processes
+                                    .sort_by_key(|process| std::cmp::Reverse(process.used_memory));
                             } else {
-                                processes.sort_by(|a, b| a.used_memory.cmp(&b.used_memory));
-                                // Ascending
+                                processes.sort_by_key(|a| a.used_memory);
                             }
                         }
                         ProcessSortBy::Name => {
                             if sort_reverse {
                                 processes.sort_by(|a, b| {
                                     b.name.to_lowercase().cmp(&a.name.to_lowercase())
-                                }); // Descending
+                                });
                             } else {
                                 processes.sort_by(|a, b| {
                                     a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                                }); // Ascending
+                                });
                             }
                         }
                         ProcessSortBy::Pid => {
                             if sort_reverse {
-                                processes.sort_by(|a, b| b.pid.cmp(&a.pid)); // Descending
+                                processes.sort_by_key(|process| std::cmp::Reverse(process.pid));
                             } else {
-                                processes.sort_by(|a, b| a.pid.cmp(&b.pid)); // Ascending
+                                processes.sort_by_key(|a| a.pid);
                             }
                         }
                     }
@@ -542,41 +841,33 @@ fn draw_misc_with_processes<'d>(
                     format!("No processes match '{}'", search_term)
                 } else {
                     let mut content = String::new();
-                    //TODO: Nicer stringing without these manual spaces...
                     content.push_str("Name                                    PID              Memory(MB)  Type\n");
                     for (idx, proc) in processes.iter().take(40).enumerate() {
                         let memory_mb = proc.used_memory / 1024 / 1024;
+                        let process_type = if proc.is_compute { "C" } else { "G" };
+                        let row_prefix = "  ";
 
-                        // Determine process type (this is a simplified approach)
-                        let process_type = if proc.name.contains("comp")
-                            || proc.name.contains("cuda")
-                            || proc.name.contains("nvidia")
-                        {
-                            "C" // Compute
-                        } else {
-                            "G" // Graphics
-                        };
+                        let mut name_truncated = proc.name.clone();
+                        if name_truncated.chars().count() > 38 {
+                            name_truncated =
+                                name_truncated.chars().take(35).collect::<String>() + "...";
+                        }
 
-                        // Row prefix for display
-                        let row_prefix = "  "; // Using spaces for appearance
-
-                        // Highlight the currently selected/highlighted process
-                        //BUG: this doesn't work...
                         let line = if process_selection_enabled && idx == highlighted_process_index
                         {
                             format!(
                                 "> {:<38} {:>15} {:>13} MB  {}\n",
-                                proc.name, proc.pid, memory_mb, process_type
+                                name_truncated, proc.pid, memory_mb, process_type
                             )
                         } else if selected_process_pid == Some(proc.pid) {
                             format!(
                                 "* {:<38} {:>15} {:>13} MB  {}\n",
-                                proc.name, proc.pid, memory_mb, process_type
+                                name_truncated, proc.pid, memory_mb, process_type
                             )
                         } else {
                             format!(
                                 "{}{:<38} {:>15} {:>13} MB  {}\n",
-                                row_prefix, proc.name, proc.pid, memory_mb, process_type
+                                row_prefix, name_truncated, proc.pid, memory_mb, process_type
                             )
                         };
 
@@ -586,10 +877,7 @@ fn draw_misc_with_processes<'d>(
                 }
             }
         }
-        Err(_) => {
-            // Fallback: show misc info with error message
-            format!("{}\n\nError retrieving processes", gpu.misc)
-        }
+        Err(_) => format!("{}\n\nError retrieving processes", gpu.misc),
     };
 
     Paragraph::new(content)
@@ -638,7 +926,6 @@ fn draw_core_clock<'d>(gpu: &GpuInfo<'d>) -> Result<Gauge<'d>, NvTopError> {
         .ratio(percentage))
 }
 
-// Helper function for fuzzy matching using a more sophisticated algorithm
 fn fuzzy_match(text: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
         return true;
@@ -663,7 +950,6 @@ fn fuzzy_match(text: &str, pattern: &str) -> bool {
     pattern_idx == pattern_chars.len()
 }
 
-// Helper to score fuzzy matches (higher score = better match)
 fn fuzzy_score(text: &str, pattern: &str) -> i32 {
     if pattern.is_empty() {
         return 0;
@@ -673,10 +959,9 @@ fn fuzzy_score(text: &str, pattern: &str) -> i32 {
     let pattern_lower = pattern.to_lowercase();
 
     if !fuzzy_match(text, pattern) {
-        return -1; // No match
+        return -1;
     }
 
-    // Calculate match quality
     let mut score = 0;
     let text_chars: Vec<char> = text_lower.chars().collect();
     let pattern_chars: Vec<char> = pattern_lower.chars().collect();
@@ -685,86 +970,23 @@ fn fuzzy_score(text: &str, pattern: &str) -> i32 {
     let mut pattern_idx = 0;
     let mut consecutive_bonus = 0;
 
-    // Simple scoring algorithm: find matches and give bonuses for consecutive letters
     while text_idx < text_chars.len() && pattern_idx < pattern_chars.len() {
         if text_chars[text_idx] == pattern_chars[pattern_idx] {
-            // Bonus for consecutive matches
             if text_idx > 0
                 && pattern_idx > 0
                 && text_chars[text_idx - 1] == pattern_chars[pattern_idx - 1]
             {
                 consecutive_bonus += 10;
             } else {
-                consecutive_bonus = 10; // Base bonus for a match
+                consecutive_bonus = 10;
             }
-
-            score += consecutive_bonus + 5; // Base score plus consecutive bonus
+            score += consecutive_bonus + 5;
             pattern_idx += 1;
         } else {
-            consecutive_bonus = 0; // Reset consecutive bonus
+            consecutive_bonus = 0;
         }
-
         text_idx += 1;
     }
 
     score
-}
-
-fn get_gpu_processes<'d>(gpu: &GpuInfo<'d>) -> Result<Vec<GpuProcess>, NvmlError> {
-    let mut gpu_processes = Vec::new();
-
-    if let Ok(compute_processes) = gpu.inner.running_compute_processes() {
-        for process in compute_processes {
-            let name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
-                Ok(name) => name.trim().to_string(),
-                Err(_) => format!("Process-{}", process.pid),
-            };
-
-            let memory_value = extract_memory_value(process.used_gpu_memory);
-
-            gpu_processes.push(GpuProcess {
-                pid: process.pid,
-                used_memory: memory_value,
-                name,
-            });
-        }
-    }
-
-    if let Ok(graphics_processes) = gpu.inner.running_graphics_processes() {
-        for process in graphics_processes {
-            if !gpu_processes.iter().any(|p| p.pid == process.pid) {
-                let name = match std::fs::read_to_string(format!("/proc/{}/comm", process.pid)) {
-                    Ok(name) => name.trim().to_string(),
-                    Err(_) => format!("Process-{}", process.pid),
-                };
-
-                let memory_value = extract_memory_value(process.used_gpu_memory);
-
-                gpu_processes.push(GpuProcess {
-                    pid: process.pid,
-                    used_memory: memory_value,
-                    name,
-                });
-            }
-        }
-    }
-
-    Ok(gpu_processes)
-}
-
-fn extract_memory_value(used_memory: nvml_wrapper::enums::device::UsedGpuMemory) -> u64 {
-    let s = format!("{:?}", used_memory);
-
-    if let Some(start) = s.find('(')
-        && let Some(end) = s.find(')')
-        && start < end
-    {
-        let num_str = &s[start + 1..end];
-        return num_str.parse::<u64>().unwrap_or(0);
-    }
-    s.chars()
-        .filter(|c| c.is_ascii_digit())
-        .collect::<String>()
-        .parse::<u64>()
-        .unwrap_or(0)
 }
