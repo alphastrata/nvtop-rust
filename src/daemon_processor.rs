@@ -140,13 +140,10 @@ pub fn execute_streaming_daemon(
                 &fan_policy,
                 target_pid,
             )?;
-            let json_line = serde_json::to_string(&packet)
-                .map_err(io::Error::other)?
-                + "\n";
+            let json_line = serde_json::to_string(&packet).map_err(io::Error::other)? + "\n";
 
             fh.write_all(json_line.as_bytes())?;
             fh.flush()?;
-
 
             if stream_cap_bytes > 0 && fh.metadata()?.len() > stream_cap_bytes {
                 let path = output_path.to_string();
@@ -274,8 +271,10 @@ mod tests {
             "trimmed stream length {} exceeds cap",
             content.len()
         );
-        assert!(content.ends_with("f\n"), "stream missing latest line: {content}");
+        assert!(
+            content.ends_with("f\n"),
+            "stream missing latest line: {content}"
+        );
         let _ = fs::remove_file(path);
     }
 }
-
