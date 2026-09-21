@@ -282,11 +282,10 @@ pub fn run(
                             continue;
                         }
                     }
-                    KeyCode::Left
-                        if !fuzzy_search_active => {
-                            active_tab = active_tab.prev(gpu_list.len());
-                            continue;
-                        }
+                    KeyCode::Left if !fuzzy_search_active => {
+                        active_tab = active_tab.prev(gpu_list.len());
+                        continue;
+                    }
                     _ => {}
                 }
             }
@@ -844,7 +843,11 @@ fn draw_misc_with_processes<'d>(
                     content.push_str("Name                                    PID              Memory(MB)  Type\n");
                     for (idx, proc) in processes.iter().take(40).enumerate() {
                         let memory_mb = proc.used_memory / 1024 / 1024;
-                        let process_type = if proc.is_compute { "C" } else { "G" };
+                        let process_type = match (proc.is_compute, proc.is_graphics) {
+                            (true, true) => "C+G",
+                            (true, false) => "C",
+                            (false, _) => "G",
+                        };
                         let row_prefix = "  ";
 
                         let mut name_truncated = proc.name.clone();

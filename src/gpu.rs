@@ -9,6 +9,7 @@ use nvml_wrapper::{
     enum_wrappers::device::{Clock, ClockId, TemperatureSensor},
     enums::device::UsedGpuMemory,
     error::NvmlError,
+    struct_wrappers::device::ProcessInfo,
 };
 
 use crate::{errors::NvTopError, termite::LoggingHandle};
@@ -20,6 +21,7 @@ pub struct GpuProcess {
     pub used_memory: u64,
     pub name: String,
     pub is_compute: bool,
+    pub is_graphics: bool,
 }
 
 #[derive(Debug)]
@@ -184,49 +186,53 @@ pub fn try_init_gpus<'n>(
     }
 }
 
+fn merge_process_contexts(
+    gpu_processes: &mut Vec<GpuProcess>,
+    processes: Vec<ProcessInfo>,
+    is_compute: bool,
+    is_graphics: bool,
+) {
+    for process in processes {
+        let memory_bytes = match process.used_gpu_memory {
+            UsedGpuMemory::Used(bytes) => bytes,
+            UsedGpuMemory::Unavailable => 0,
+        };
+
+        if let Some(entry) = gpu_processes.iter_mut().find(|p| p.pid == process.pid) {
+            entry.used_memory += memory_bytes;
+            entry.is_compute |= is_compute;
+            entry.is_graphics |= is_graphics;
+        } else {
+            gpu_processes.push(GpuProcess {
+                pid: process.pid,
+                used_memory: memory_bytes,
+                is_compute,
+                is_graphics,
+                name: String::new(),
+            });
+        }
+    }
+}
+
 pub fn get_gpu_processes(device: &Device) -> Result<Vec<GpuProcess>, NvmlError> {
     let mut gpu_processes = Vec::new();
 
-    // 1. Ingest True Compute Context Processes Natively
-    if let Ok(compute_processes) = device.running_compute_processes() {
-        for process in compute_processes {
-            let memory_bytes = match process.used_gpu_memory {
-                UsedGpuMemory::Used(bytes) => bytes,
-                UsedGpuMemory::Unavailable => 0,
-            };
+    merge_process_contexts(
+        &mut gpu_processes,
+        device.running_compute_processes().unwrap_or_default(),
+        true,
+        false,
+    );
+    merge_process_contexts(
+        &mut gpu_processes,
+        device.running_graphics_processes().unwrap_or_default(),
+        false,
+        true,
+    );
 
-            gpu_processes.push(GpuProcess {
-                pid: process.pid,
-                used_memory: memory_bytes,
-                is_compute: true,
-                name: "".to_string(), // NVML doesn't provide names for compute processes natively
-            });
-        }
-    }
-
-    // 2. Ingest Graphics Context Processes Natively (NVidia Driver)
-    if let Ok(graphics_processes) = device.running_graphics_processes() {
-        for process in graphics_processes {
-            let memory_bytes = match process.used_gpu_memory {
-                UsedGpuMemory::Used(bytes) => bytes,
-                UsedGpuMemory::Unavailable => 0,
-            };
-
-            gpu_processes.push(GpuProcess {
-                pid: process.pid,
-                used_memory: memory_bytes,
-                is_compute: false,
-                name: "".to_string(),
-            });
-        }
-    }
-
-    // 3. Ingest Process Names via Hayaku
     if gpu_processes.is_empty() {
         return Ok(gpu_processes);
     }
-
-    // Parallel lookup of process names using the Hayaku binary pipeline stream
 
     for proc_entry in &mut gpu_processes {
         let mut cmd = Command::new("sh");
@@ -248,4 +254,55 @@ pub fn get_gpu_processes(device: &Device) -> Result<Vec<GpuProcess>, NvmlError> 
     }
 
     Ok(gpu_processes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn process_info(pid: u32, bytes: u64) -> ProcessInfo {
+        ProcessInfo {
+            pid,
+            used_gpu_memory: UsedGpuMemory::Used(bytes),
+            gpu_instance_id: None,
+            compute_instance_id: None,
+        }
+    }
+
+    #[test]
+    fn merge_dedupes_pids_across_contexts() {
+        let mut processes = Vec::new();
+        merge_process_contexts(
+            &mut processes,
+            vec![process_info(1, 100), process_info(2, 200)],
+            true,
+            false,
+        );
+        merge_process_contexts(
+            &mut processes,
+            vec![process_info(2, 300), process_info(3, 400)],
+            false,
+            true,
+        );
+
+        assert_eq!(
+            processes.len(),
+            3,
+            "duplicate PID must not produce a second row"
+        );
+
+        let both = processes.iter().find(|p| p.pid == 2).unwrap();
+        assert_eq!(
+            both.used_memory, 500,
+            "memory from both contexts must be summed"
+        );
+        assert!(
+            both.is_compute && both.is_graphics,
+            "both context flags must be set"
+        );
+
+        let compute_only = processes.iter().find(|p| p.pid == 1).unwrap();
+        assert!(compute_only.is_compute && !compute_only.is_graphics);
+        assert_eq!(compute_only.used_memory, 100);
+    }
 }
