@@ -10,13 +10,13 @@ license = "MIT"
 homepage = "https://www.jeremyfwebb.ninja"
 
 [dependencies]
-anyhow = "1.0.100"
-argh = "0.1.12"
+anyhow = "1.0.104"
+argh = "0.1.19"
 crossterm = "0.29.0"
 nvml-wrapper = "0.12.1"
-ratatui = "0.30.0"
+ratatui = "0.30.2"
 skim = "0.10.4"
-thiserror = "2.0.18"
+thiserror = "2.0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 flume = "0.12.0"
